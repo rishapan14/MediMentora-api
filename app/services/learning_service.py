@@ -1,12 +1,14 @@
 """Learning progress, weak topics, and recommendations."""
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 
 from app.extensions import db
-from app.models.course_model import CompletedLesson, Course, Lesson
+from app.models.course_model import CompletedLesson, Course, CourseProgress, Lesson
 from app.models.progress_model import Progress
 from app.models.quiz_model import Result
 from app.models.recommendation_model import Recommendation
+from app.utils import utc_now
 
 
 class LearningService:
@@ -28,7 +30,7 @@ class LearningService:
     return progress
 
   @staticmethod
-  def update_learning_progress(user_id):
+  def update_learning_progress(user_id, minutes_delta: int = 0):
     progress = LearningService.get_or_create_progress(user_id)
     total_lessons = Lesson.query.count()
     completed = CompletedLesson.query.filter_by(user_id=user_id).count()
@@ -38,8 +40,76 @@ class LearningService:
     else:
       progress.learning_progress = 0.0
 
+    if minutes_delta and minutes_delta > 0:
+      progress.total_study_minutes = (progress.total_study_minutes or 0) + int(minutes_delta)
+
     db.session.commit()
     return progress
+
+  @staticmethod
+  def enroll_course(user_id, course_id):
+    """Create course enrollment/progress if missing."""
+    course = Course.query.get(course_id)
+    if not course:
+      return None
+
+    row = CourseProgress.query.filter_by(user_id=user_id, course_id=course_id).first()
+    total = course.lessons.count()
+    if row:
+      row.lessons_total = total
+      db.session.commit()
+      return row
+
+    row = CourseProgress(
+      user_id=user_id,
+      course_id=course_id,
+      status="enrolled",
+      progress_percent=0,
+      lessons_completed=0,
+      lessons_total=total,
+      enrolled_at=utc_now(),
+    )
+    db.session.add(row)
+    course.enrollment_count = (course.enrollment_count or 0) + 1
+    db.session.commit()
+    return row
+
+  @staticmethod
+  def update_course_progress(user_id, course_id, last_lesson_id=None, minutes_delta: int = 0):
+    """Recalculate per-course progress after a lesson is completed."""
+    course = Course.query.get(course_id)
+    if not course:
+      return None
+
+    row = CourseProgress.query.filter_by(user_id=user_id, course_id=course_id).first()
+    if not row:
+      row = LearningService.enroll_course(user_id, course_id)
+
+    lesson_ids = [lesson.id for lesson in course.lessons.all()]
+    completed = (
+      CompletedLesson.query.filter(
+        CompletedLesson.user_id == user_id,
+        CompletedLesson.lesson_id.in_(lesson_ids),
+      ).count()
+      if lesson_ids
+      else 0
+    )
+    total = len(lesson_ids)
+    percent = round((completed / total) * 100, 2) if total else 0.0
+
+    row.lessons_completed = completed
+    row.lessons_total = total
+    row.progress_percent = percent
+    row.status = "completed" if total and completed >= total else "in_progress"
+    if last_lesson_id:
+      row.last_lesson_id = last_lesson_id
+    if minutes_delta and minutes_delta > 0:
+      row.study_minutes = (row.study_minutes or 0) + int(minutes_delta)
+    if row.status == "completed" and not row.completed_at:
+      row.completed_at = utc_now()
+    row.updated_at = utc_now()
+    db.session.commit()
+    return row
 
   @staticmethod
   def detect_weak_topics(user_id):
@@ -63,16 +133,32 @@ class LearningService:
   @staticmethod
   def generate_recommendations(user_id):
     """Create course recommendations based on weak topics."""
-    weak_topics = LearningService.detect_weak_topics(user_id)
+    progress = LearningService.get_or_create_progress(user_id)
+    weak_topics = progress.weak_topics or []
+    if not weak_topics:
+      weak_topics = LearningService.detect_weak_topics(user_id)
     created = []
 
     for item in weak_topics[:5]:
+      if not isinstance(item, dict):
+        continue
       speciality = item.get("speciality")
       course = None
       if speciality:
-        course = Course.query.filter_by(speciality=speciality, is_published=True).first()
+        course = Course.query.filter(
+          or_(Course.is_published.is_(True), Course.is_published.is_(None)),
+          Course.speciality.ilike(f"%{speciality}%"),
+        ).first()
+        if not course:
+          # Alias short labels like Nursing → Nursing Fundamentals
+          course = Course.query.filter(
+            or_(Course.is_published.is_(True), Course.is_published.is_(None)),
+            Course.speciality.ilike(f"%{str(speciality).split()[0]}%"),
+          ).first()
       if not course:
-        course = Course.query.filter_by(is_published=True).first()
+        course = Course.query.filter(
+          or_(Course.is_published.is_(True), Course.is_published.is_(None))
+        ).first()
       if not course:
         continue
 
