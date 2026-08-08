@@ -5,6 +5,7 @@ from app.controllers import report_controller as ctrl
 
 report_bp = Blueprint("reports", __name__, url_prefix="/api/reports")
 
+report_bp.add_url_rule("/upload", view_func=jwt_required()(ctrl.upload_multiple), methods=["POST"])
 report_bp.add_url_rule("/upload/pdf", view_func=jwt_required()(ctrl.upload_pdf), methods=["POST"])
 report_bp.add_url_rule("/upload/image", view_func=jwt_required()(ctrl.upload_image), methods=["POST"])
 report_bp.add_url_rule("", view_func=jwt_required()(ctrl.save_report), methods=["POST"])
