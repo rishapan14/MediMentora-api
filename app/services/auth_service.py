@@ -20,7 +20,7 @@ class AuthService:
 
     user = User(
       email=email.strip().lower(),
-      full_name=full_name,
+      full_name=(full_name or "").strip() or None,
       role=role or ROLE_MEDICAL_STUDENT,
     )
     user.set_password(password)
@@ -58,7 +58,7 @@ class AuthService:
     )
     db.session.commit()
 
-    reset_link = f"{current_app.config['FRONTEND_URL']}/reset-password?token={token}"
+    reset_link = f"{current_app.config['FRONTEND_URL']}/auth/reset-password?token={token}"
     return {"user": user, "reset_token": token, "reset_link": reset_link}
 
   @staticmethod
@@ -79,6 +79,8 @@ class AuthService:
   def update_profile(user, data):
     if "full_name" in data:
       user.full_name = data["full_name"]
+    if "role" in data and data["role"] in VALID_ROLES:
+      user.role = data["role"]
     if "speciality" in data:
       user.speciality = data["speciality"]
     if "bio" in data:
