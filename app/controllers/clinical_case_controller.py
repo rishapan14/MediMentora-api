@@ -19,7 +19,7 @@ def list_cases():
   if disease:
     query = query.filter(ClinicalCase.disease.ilike(f"%{disease}%"))
   if speciality:
-    query = query.filter_by(speciality=speciality)
+    query = query.filter(ClinicalCase.speciality.ilike(f"%{speciality}%"))
   if difficulty:
     query = query.filter_by(difficulty=difficulty)
   if search:
@@ -32,14 +32,25 @@ def list_cases():
     )
 
   cases = query.order_by(ClinicalCase.created_at.desc()).all()
-  return success_response("Clinical cases retrieved.", {"cases": [c.to_dict() for c in cases]})
+  favorited_ids = {
+    fav.case_id
+    for fav in CaseFavorite.query.filter_by(user_id=current_user.id).all()
+  }
+  return success_response("Clinical cases retrieved.", {
+    "cases": [{**c.to_dict(), "bookmarked": c.id in favorited_ids} for c in cases],
+  })
 
 
 def get_case(case_id):
   case = ClinicalCase.query.get(case_id)
   if not case:
     return error_response("Clinical case not found.", 404)
-  return success_response("Clinical case retrieved.", {"case": case.to_dict()})
+  bookmarked = CaseFavorite.query.filter_by(
+    user_id=current_user.id, case_id=case_id
+  ).first() is not None
+  return success_response("Clinical case retrieved.", {
+    "case": {**case.to_dict(), "bookmarked": bookmarked},
+  })
 
 
 def create_case():
