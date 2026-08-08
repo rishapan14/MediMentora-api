@@ -13,6 +13,8 @@ class User(db.Model):
   password = db.Column(db.String(255), nullable=False)
   full_name = db.Column(db.String(150), nullable=True)
   role = db.Column(db.String(30), nullable=False, default="medical_student")
+  # Clinical/system role restored when demoting from Admin Panel Admin → User
+  previous_role = db.Column(db.String(30), nullable=True)
   speciality = db.Column(db.String(100), nullable=True)
   bio = db.Column(db.Text, nullable=True)
   reset_token = db.Column(db.String(255), nullable=True)
@@ -37,6 +39,10 @@ class User(db.Model):
   bookmarks = db.relationship("LessonBookmark", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   completed_lessons = db.relationship("CompletedLesson", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   case_favorites = db.relationship("CaseFavorite", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
+  xray_analyses = db.relationship("XrayAnalysis", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
+  course_progress = db.relationship("CourseProgress", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
+  course_bookmarks = db.relationship("CourseBookmark", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
+  course_reviews = db.relationship("CourseReview", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
 
   def set_password(self, password):
     self.password = generate_password_hash(password)
@@ -44,11 +50,23 @@ class User(db.Model):
   def check_password(self, password):
     return check_password_hash(self.password, password)
 
+  @property
+  def is_admin(self) -> bool:
+    from app.constants import is_admin_role
+
+    return is_admin_role(self.role)
+
   def to_dict(self, include_email=True):
     data = {
       "id": self.id,
       "full_name": self.full_name,
       "role": self.role,
+      "previous_role": self.previous_role,
+      "is_admin": self.is_admin,
+      # Frontend alias used by Admin Panel guards
+      "isAdmin": self.is_admin,
+      # Binary Admin Panel label (Admin vs User)
+      "panel_role": "Admin" if self.is_admin else "User",
       "speciality": self.speciality,
       "bio": self.bio,
       "is_active": self.is_active,
