@@ -23,12 +23,14 @@ def list_quizzes():
 
 def get_quiz(quiz_id):
   quiz = Quiz.query.get(quiz_id)
-  if not quiz:
+  if not quiz or not quiz.is_published:
     return error_response("Quiz not found.", 404)
   return success_response("Quiz retrieved.", {"quiz": quiz.to_dict(include_questions=True)})
 
 
 def create_quiz():
+  from app.services.admin.settings_admin_service import AdminSettingsService
+
   data = request.get_json(silent=True)
   errors = validate_quiz(data)
   if errors:
@@ -39,7 +41,14 @@ def create_quiz():
     description=data.get("description"),
     difficulty=data.get("difficulty", "medium"),
     speciality=data.get("speciality"),
-    time_limit_minutes=data.get("time_limit_minutes", 30),
+    time_limit_minutes=data.get(
+      "time_limit_minutes",
+      AdminSettingsService.get_int("default_quiz_time_limit_minutes", 30),
+    ),
+    passing_score=data.get(
+      "passing_score",
+      AdminSettingsService.get_int("default_quiz_passing_score", 70),
+    ),
     created_by=current_user.id,
   )
   db.session.add(quiz)
@@ -134,6 +143,9 @@ def submit_quiz(quiz_id):
   except ValueError as exc:
     return error_response(str(exc), 400)
 
+  passing = quiz.passing_score if quiz.passing_score is not None else 70
+  attempt_number = Result.query.filter_by(user_id=current_user.id, quiz_id=quiz_id).count() + 1
+
   result = Result(
     user_id=current_user.id,
     quiz_id=quiz_id,
@@ -141,11 +153,20 @@ def submit_quiz(quiz_id):
     total_questions=calc["total_questions"],
     correct_answers=calc["correct_answers"],
     answers=data["answers"],
+    passed=calc["score"] >= passing,
+    attempt_number=attempt_number,
   )
   db.session.add(result)
   db.session.commit()
 
   LearningService.record_quiz_score(current_user.id, quiz_id, calc["score"])
+
+  try:
+    from app.services.body_systems.hub_quiz_service import HubQuizService
+
+    HubQuizService.record_progress_for_quiz(current_user.id, int(quiz_id), float(calc["score"]))
+  except Exception:
+    pass
 
   return success_response("Quiz submitted.", {
     "result": result.to_dict(),
