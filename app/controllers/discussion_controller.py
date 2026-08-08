@@ -16,8 +16,15 @@ def list_discussions():
     term = f"%{request.args.get('search')}%"
     query = query.filter(or_(Discussion.title.ilike(term), Discussion.content.ilike(term)))
   discussions = query.order_by(Discussion.created_at.desc()).all()
+  liked_ids = {
+    like.discussion_id
+    for like in DiscussionLike.query.filter_by(user_id=current_user.id).all()
+  }
   return success_response("Discussions retrieved.", {
-    "discussions": [d.to_dict() for d in discussions],
+    "discussions": [
+      {**d.to_dict(), "liked_by_current_user": d.id in liked_ids}
+      for d in discussions
+    ],
   })
 
 
