@@ -17,7 +17,7 @@ MarkupSafe==3.0.3
 # ---------------------------------------------------------------------------
 # Core image processing (installed & verified on this machine)
 numpy==2.5.1
-opencv-python==5.0.0
+opencv-python==5.0.0.93
 pillow==12.3.0
 
 # DICOM radiograph validation / pixel extraction (Phase 1 X-ray uploads)
