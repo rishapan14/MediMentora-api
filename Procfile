@@ -1,1 +1,1 @@
-web: python -m app.schema_bootstrap && gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-2} --worker-class sync --timeout 180 --graceful-timeout 30 --keep-alive 5 --max-requests 500 --max-requests-jitter 50 --access-logfile - --error-logfile - run:app
+web: python -m app.schema_bootstrap && gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-2} --worker-class sync --timeout 180 --graceful-timeout 30 --keep-alive 5 --max-requests 500 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level warning run:app
