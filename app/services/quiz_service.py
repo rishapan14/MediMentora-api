@@ -26,11 +26,18 @@ class QuizService:
     for question in questions:
       key = str(question.id)
       selected = answers.get(key) or answers.get(question.id)
-      is_correct = selected is not None and str(selected).strip() == str(question.correct_answer).strip()
+      qtype = (question.question_type or "multiple_choice").lower()
+      if selected is None:
+        is_correct = False
+      elif qtype == "fill_in_blank":
+        is_correct = str(selected).strip().casefold() == str(question.correct_answer).strip().casefold()
+      else:
+        is_correct = str(selected).strip() == str(question.correct_answer).strip()
       validated[key] = {
         "selected": selected,
         "correct": question.correct_answer,
         "is_correct": is_correct,
+        "explanation": question.explanation,
       }
       if is_correct:
         earned += question.points
