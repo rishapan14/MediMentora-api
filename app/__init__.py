@@ -15,9 +15,30 @@ def create_app():
   app = Flask(__name__)
   app.config.from_object(Config)
 
+  # Resolve relative upload folders against the API project root (parent of app/)
+  project_root = os.path.abspath(os.path.join(app.root_path, os.pardir))
+  for key in (
+    "UPLOAD_FOLDER",
+    "REPORT_UPLOAD_FOLDER",
+    "CERTIFICATE_UPLOAD_FOLDER",
+    "XRAY_UPLOAD_FOLDER",
+    "XRAY_HEATMAP_FOLDER",
+    "XRAY_PREPROCESSED_FOLDER",
+    "XRAY_REFERENCE_LIBRARY_FOLDER",
+    "TEACHER_UPLOAD_FOLDER",
+  ):
+    value = app.config.get(key)
+    if value and not os.path.isabs(value):
+      app.config[key] = os.path.join(project_root, value)
+
   # Ensure upload directories exist
   os.makedirs(app.config["REPORT_UPLOAD_FOLDER"], exist_ok=True)
   os.makedirs(app.config["CERTIFICATE_UPLOAD_FOLDER"], exist_ok=True)
+  os.makedirs(app.config["XRAY_UPLOAD_FOLDER"], exist_ok=True)
+  os.makedirs(app.config["XRAY_HEATMAP_FOLDER"], exist_ok=True)
+  os.makedirs(app.config["XRAY_PREPROCESSED_FOLDER"], exist_ok=True)
+  os.makedirs(app.config["XRAY_REFERENCE_LIBRARY_FOLDER"], exist_ok=True)
+  os.makedirs(app.config["TEACHER_UPLOAD_FOLDER"], exist_ok=True)
 
   db.init_app(app)
   jwt.init_app(app)
@@ -32,14 +53,22 @@ def create_app():
     CommentLike,
     CompletedLesson,
     Course,
+    CourseBookmark,
+    CourseCategory,
+    CourseModule,
+    CourseProgress,
+    CourseReview,
     Discussion,
     DiscussionLike,
     Lesson,
     LessonBookmark,
+    LessonResource,
+    LessonVideo,
     Notification,
     Progress,
     Question,
     Quiz,
+    QuizAnswer,
     Recommendation,
     Report,
     ReportAnalysis,
@@ -47,6 +76,21 @@ def create_app():
     Simulation,
     SimulationAttempt,
     User,
+    XrayAnalysis,
+    Book,
+    Chapter,
+    PlatformSetting,
+    BodySystem,
+    Organ,
+    HubDisease,
+    BodySystemCourse,
+    BodySystemQuiz,
+    OrganLesson,
+    HubDiseaseClinicalCase,
+    HubFlashcard,
+    HubFlashcardFavorite,
+    BodySystemProgress,
+    HubRecommendation,
   )
 
   @jwt.user_lookup_loader
@@ -56,9 +100,98 @@ def create_app():
       user_id = int(jwt_data["sub"])
     except (KeyError, TypeError, ValueError):
       return None
-    return db.session.get(UserModel, user_id)
+    user = db.session.get(UserModel, user_id)
+    # Deactivated accounts must not authorize API calls with existing JWTs
+    if user is not None and getattr(user, "is_active", True) is False:
+      return None
+    return user
+
+  @jwt.user_lookup_error_loader
+  def user_lookup_error_callback(_jwt_header, _jwt_data):
+    return error_response("Account is deactivated or no longer valid.", 403)
 
   register_blueprints(app)
+
+  @app.before_request
+  def _ensure_schema_once():
+    """Apply lightweight DB patches once per process."""
+    if getattr(app, "_schema_patched", False):
+      return
+    from app.helpers.schema_patches import (
+      ensure_body_systems_hub_schema,
+      ensure_learning_schema,
+      ensure_medical_teacher_schema,
+      ensure_platform_settings_schema,
+      ensure_report_history_schema,
+      ensure_user_previous_role_schema,
+      ensure_xray_analysis_schema,
+      ensure_xray_reference_library_schema,
+    )
+
+    ensure_report_history_schema()
+    ensure_xray_analysis_schema()
+    ensure_xray_reference_library_schema()
+    ensure_learning_schema()
+    ensure_body_systems_hub_schema()
+    ensure_medical_teacher_schema()
+    ensure_platform_settings_schema()
+    ensure_user_previous_role_schema()
+    app._schema_patched = True
+
+  @app.before_request
+  def _enforce_maintenance_mode():
+    """Block non-admin API traffic while maintenance mode is on."""
+    from flask import request
+    from flask_jwt_extended import verify_jwt_in_request
+
+    path = request.path or ""
+    if not path.startswith("/api/"):
+      return None
+    # Public / admin-exempt endpoints
+    exempt_prefixes = (
+      "/api/auth/login",
+      "/api/auth/refresh",
+      "/api/auth/forgot-password",
+      "/api/auth/reset-password",
+      "/api/platform/",
+      "/api/admin/",
+    )
+    if path == "/api/auth/register":
+      return None  # handled inside register controller
+    if any(path.startswith(p) for p in exempt_prefixes):
+      return None
+    if path in ("/", "/api", "/api/"):
+      return None
+
+    try:
+      from app.services.admin.settings_admin_service import AdminSettingsService
+
+      if not AdminSettingsService.get_bool("maintenance_mode", False):
+        return None
+    except Exception:
+      return None
+
+    # Allow admins with a valid JWT; block everyone else
+    try:
+      verify_jwt_in_request(optional=True)
+    except Exception:
+      return error_response(
+        "MediMentora is temporarily in maintenance mode. Please try again later.",
+        503,
+        {"error_code": "maintenance_mode"},
+      )
+
+    from flask_jwt_extended import current_user as jwt_user
+
+    from app.constants import is_admin_role
+
+    if jwt_user is not None and is_admin_role(getattr(jwt_user, "role", None)):
+      return None
+    return error_response(
+      "MediMentora is temporarily in maintenance mode. Please try again later.",
+      503,
+      {"error_code": "maintenance_mode"},
+    )
 
   @app.route("/", methods=["GET"])
   def api_home():
@@ -68,11 +201,18 @@ def create_app():
       "message": "AI-Powered Clinical Report Analysis & Nursing Assistance Platform API",
       "data": {
         "version": "1.0.0",
+        "docs": {
+          "xray_swagger_ui": "/apidocs",
+          "xray_openapi": "/apispec/xray.yaml",
+          "xray_openapi_meta": "/apispec/xray",
+        },
         "modules": {
           "auth": "/api/auth",
           "reports": "/api/reports",
           "analysis": "/api/analysis",
           "learning": "/api/learning",
+          "medical_teacher": "/api/medical-teacher",
+          "xray": "/api/xray",
           "clinical_cases": "/api/clinical-cases",
           "simulations": "/api/simulations",
           "quizzes": "/api/quizzes",
