@@ -7,12 +7,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _csv_env(name: str, default: str) -> tuple[str, ...]:
+    """Read a comma-separated environment variable into clean values."""
+    return tuple(value.strip().rstrip("/") for value in os.getenv(name, default).split(",") if value.strip())
+
+
 class Config:
     """Application configuration loaded from environment variables."""
 
     # Flask
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
     FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+    PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:5000").rstrip("/")
+    CORS_ORIGINS = _csv_env(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,https://medimentora-client.vercel.app",
+    )
 
     # MySQL database
     # Support both this application's DB_* names and Railway MySQL's native

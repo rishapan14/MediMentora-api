@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -42,7 +42,18 @@ def create_app():
 
   db.init_app(app)
   jwt.init_app(app)
-  CORS(app)
+  CORS(
+    app,
+    resources={
+      r"/api/*": {"origins": app.config["CORS_ORIGINS"]},
+      r"/health": {"origins": app.config["CORS_ORIGINS"]},
+    },
+    methods=("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
+    allow_headers=("Authorization", "Content-Type", "Accept"),
+    expose_headers=("Content-Disposition",),
+    supports_credentials=False,
+    max_age=600,
+  )
 
   # Import all models so SQLAlchemy registers metadata before create_all()
   from app.models import (  # noqa: F401
@@ -115,6 +126,8 @@ def create_app():
   @app.before_request
   def _ensure_schema_once():
     """Apply lightweight DB patches once per process."""
+    if request.path == "/health":
+      return
     if getattr(app, "_schema_patched", False):
       return
     from app.helpers.schema_patches import (
@@ -195,7 +208,6 @@ def create_app():
 
   @app.route("/", methods=["GET"])
   def api_home():
-    from flask import jsonify
     return jsonify({
       "status": "success",
       "message": "AI-Powered Clinical Report Analysis & Nursing Assistance Platform API",
@@ -223,6 +235,11 @@ def create_app():
         },
       },
     })
+
+  @app.route("/health", methods=["GET"])
+  def health_check():
+    """Unauthenticated liveness endpoint for Railway and the frontend."""
+    return jsonify({"status": "ok", "service": "medimentora-api"}), 200
 
   @app.errorhandler(400)
   def bad_request(err):

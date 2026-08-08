@@ -104,8 +104,8 @@ def forgot_password():
   result = AuthService.request_password_reset(data["email"])
   # Always return success to avoid email enumeration
   payload = {"message": "If the email exists, a reset link has been generated."}
-  if result:
-    payload["reset_link"] = result["reset_link"]  # Dev convenience; remove in production email flow
+  if result and current_app.config.get("FLASK_DEBUG"):
+    payload["reset_link"] = result["reset_link"]
   return success_response("Password reset initiated.", payload)
 
 
