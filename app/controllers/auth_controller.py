@@ -1,4 +1,4 @@
-from flask import request
+from flask import current_app, request
 from flask_jwt_extended import current_user, get_jwt_identity
 from sqlalchemy.exc import IntegrityError
 
@@ -14,10 +14,17 @@ from app.validations.auth_validation import (
 
 
 def register():
+  from app.services.admin.settings_admin_service import AdminSettingsService
+
+  blocked = AdminSettingsService.deny_if_registrations_closed()
+  if blocked:
+    return blocked
+
   data = request.get_json(silent=True)
   errors = validate_register(data)
   if errors:
-    return error_response("Validation failed.", 400, {"errors": errors})
+    message = errors[0] if len(errors) == 1 else "Validation failed."
+    return error_response(message, 400, {"errors": errors})
 
   try:
     user = AuthService.register_user(
@@ -37,9 +44,12 @@ def register():
   except IntegrityError:
     db.session.rollback()
     return error_response("Email address already exists.", 409)
-  except Exception:
+  except Exception as exc:
     db.session.rollback()
-    return error_response("Registration failed.", 500)
+    current_app.logger.exception("Registration failed")
+    if current_app.config.get("FLASK_DEBUG"):
+      return error_response(f"Registration failed: {exc}", 500)
+    return error_response("Registration failed. Please try again later.", 500)
 
 
 def login():
@@ -52,6 +62,19 @@ def login():
     user = AuthService.authenticate(data["email"], data["password"])
     if not user:
       return error_response("Invalid email or password.", 401)
+
+    from app.constants import is_admin_role
+    from app.services.admin.settings_admin_service import AdminSettingsService
+
+    if AdminSettingsService.get_bool("maintenance_mode", False) and not is_admin_role(
+      getattr(user, "role", None)
+    ):
+      return error_response(
+        "MediMentora is temporarily in maintenance mode. Only administrators can sign in.",
+        503,
+        {"error_code": "maintenance_mode"},
+      )
+
     tokens = AuthService.create_tokens(user)
     return success_response("Login successful.", {"user": user.to_dict(), **tokens})
   except PermissionError as exc:
@@ -64,6 +87,11 @@ def refresh():
   from flask_jwt_extended import create_access_token
 
   user_id = get_jwt_identity()
+  if current_user is not None and getattr(current_user, "is_active", True) is False:
+    return error_response("Account is deactivated.", 403)
+  # When lookup returned None for inactive, current_user is None — reject refresh
+  if current_user is None:
+    return error_response("Account is deactivated or no longer valid.", 403)
   return success_response("Token refreshed.", {"access_token": create_access_token(identity=user_id)})
 
 
