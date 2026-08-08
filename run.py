@@ -2,8 +2,6 @@ import sys
 from pathlib import Path
 
 from app import create_app
-from app.db_bootstrap import ensure_database
-from app.extensions import db
 
 
 def _print_ocr_startup_status() -> None:
@@ -46,25 +44,15 @@ def _print_ocr_startup_status() -> None:
     )
 
 
-ensure_database()
 app = create_app()
 
-with app.app_context():
-  db.create_all()
-  from app.helpers.schema_patches import (
-    ensure_body_systems_hub_schema,
-    ensure_learning_schema,
-    ensure_report_history_schema,
-    ensure_xray_analysis_schema,
-  )
-
-  ensure_report_history_schema()
-  ensure_xray_analysis_schema()
-  ensure_learning_schema()
-  ensure_body_systems_hub_schema()
-  _print_ocr_startup_status()
-
 if __name__ == "__main__":
+  # The production start command runs this before Gunicorn. Keep direct local
+  # execution convenient without running DDL during WSGI module import.
+  from app.schema_bootstrap import bootstrap_schema
+
+  bootstrap_schema(app)
+  _print_ocr_startup_status()
   app.run(
     debug=app.config["FLASK_DEBUG"],
     port=int(__import__("os").getenv("PORT", "5000")),

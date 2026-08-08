@@ -9,10 +9,11 @@ RUN apt-get update \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import rapidocr_onnxruntime"
 
 COPY . .
 
 ENV FLASK_APP=run.py
 EXPOSE 5000
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "run:app"]
+CMD ["sh", "-c", "python -m app.schema_bootstrap && exec gunicorn -w 4 -b 0.0.0.0:5000 run:app"]
