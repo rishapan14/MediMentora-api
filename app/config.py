@@ -15,11 +15,13 @@ class Config:
     FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
     # MySQL database
-    DB_USER = os.getenv("DB_USER", "root")
-    DB_PASSWORD = os.getenv("DB_PASSWORD", "root123")
-    DB_HOST = os.getenv("DB_HOST", "localhost")
-    DB_PORT = os.getenv("DB_PORT", "3306")
-    DB_NAME = os.getenv("DB_NAME", "clinical_platform_db")
+    # Support both this application's DB_* names and Railway MySQL's native
+    # MYSQL* variables. Explicit DB_* values take precedence.
+    DB_USER = os.getenv("DB_USER") or os.getenv("MYSQLUSER", "root")
+    DB_PASSWORD = os.getenv("DB_PASSWORD") or os.getenv("MYSQLPASSWORD", "root123")
+    DB_HOST = os.getenv("DB_HOST") or os.getenv("MYSQLHOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT") or os.getenv("MYSQLPORT", "3306")
+    DB_NAME = os.getenv("DB_NAME") or os.getenv("MYSQLDATABASE", "clinical_platform_db")
 
     SQLALCHEMY_DATABASE_URI = (
         f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}"
