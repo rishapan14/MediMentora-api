@@ -61,9 +61,57 @@ python run.py
 python run_seeders.py
 ```
 
-### OCR (optional)
+### OCR for image reports (required for image upload → extract text)
 
-For image report OCR, install [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) on your system.
+Image report extraction uses **pytesseract** (Python wrapper) plus the **Tesseract OCR system binary**.
+PDF extraction uses **pypdf** only and does not need Tesseract.
+
+This API runs as a **local Flask process** (or in Docker / Railway / Heroku via `Procfile`).
+The Next.js frontend does **not** perform OCR — only the Python backend does.
+
+#### Local development
+
+| OS | Install command |
+|----|-----------------|
+| **Windows** | `winget install --id UB-Mannheim.TesseractOCR` — or `choco install tesseract` — or [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) |
+| **macOS** | `brew install tesseract` |
+| **Linux (Debian/Ubuntu)** | `sudo apt-get update && sudo apt-get install -y tesseract-ocr` |
+| **Linux (Fedora/RHEL)** | `sudo dnf install -y tesseract` |
+
+After installing, **restart the API server** (`python run.py`).
+
+If Tesseract is installed but not on `PATH` (common on Windows), set in `.env`:
+
+```env
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+```
+
+Verify installation:
+
+```bash
+tesseract --version
+```
+
+When Tesseract is missing, `POST /api/reports/<id>/extract` returns HTTP **503** with an `install_hint` field containing OS-specific fix instructions.
+
+#### Docker
+
+The included `Dockerfile` installs Tesseract automatically:
+
+```bash
+docker build -t medimentor-api .
+docker run -p 5000:5000 --env-file .env medimentor-api
+```
+
+#### Heroku / Railway (buildpack + Aptfile)
+
+For buildpack-based deploys, `Aptfile` lists `tesseract-ocr`.
+Use a buildpack that supports apt packages (e.g. [heroku-buildpack-apt](https://github.com/heroku/heroku-buildpack-apt)) **before** the Python buildpack.
+
+#### Serverless / Vercel
+
+OCR cannot run on serverless Node/Vercel functions without bundling a large binary.
+Deploy this Flask API on a VM, container, or PaaS with apt/root access (Docker, Railway, Render, etc.), or switch to a hosted OCR API (Google Vision, AWS Textract) if you need serverless.
 
 ## Environment Variables
 
@@ -76,6 +124,7 @@ For image report OCR, install [Tesseract OCR](https://github.com/tesseract-ocr/t
 | `JWT_SECRET_KEY` | JWT signing key | — |
 | `OPENAI_API_KEY` | OpenAI API key | — (uses demo mock if empty) |
 | `FRONTEND_URL` | Frontend URL for password reset | `http://localhost:3000` |
+| `TESSERACT_CMD` | Full path to Tesseract binary (if not on PATH) | auto-detect |
 
 ## API Response Format
 
@@ -116,6 +165,51 @@ Authorization: Bearer <access_token>
 ## API Endpoints
 
 Base URL: `http://localhost:5000`
+
+### X-Ray OpenAPI / Swagger (Phase 18)
+
+Interactive docs for **AI X-Ray Analysis only** (student + admin monitor/reference):
+
+| URL | Description |
+|-----|-------------|
+| [`/apidocs`](http://localhost:5000/apidocs) | Swagger UI |
+| [`/apispec/xray.yaml`](http://localhost:5000/apispec/xray.yaml) | OpenAPI 3.0 YAML |
+| [`/apispec/xray`](http://localhost:5000/apispec/xray) | Spec meta + safety notes (JSON) |
+
+Source file: `docs/openapi-xray.yaml`. Authenticate in Swagger with **Authorize** → Bearer JWT from `POST /api/auth/login`.
+
+**Safety:** X-ray AI is educational / decision-support only — not a diagnosis. Admin evaluation metrics are monitoring proxies, not clinical accuracy.
+
+### AI X-Ray Analysis — `/api/xray` (JWT)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/upload` | Upload X-ray image(s) + optional clinical context |
+| GET | `/history` | Paginated own history (`date_from` / `date_to`) |
+| GET | `/dashboard` | Dashboard summary |
+| GET | `/clinical-options` | Clinical form enums |
+| POST | `/analyze` | Vision analysis (educational findings) |
+| GET/DELETE | `/<id>` | Detail / delete |
+| GET | `/<id>/file` | Original image |
+| GET | `/<id>/export` | TXT/JSON educational export |
+| POST | `/<id>/preprocess` | Preprocess pipeline |
+| GET | `/<id>/preprocessed` | Preprocessed image |
+| POST | `/<id>/reanalyze` | Re-run analysis |
+| POST | `/<id>/explain` | LLM educational explanation |
+| POST/GET | `/<id>/heatmap` | Generate / download attention heatmap |
+| GET/POST | `/<id>/compare` | Healthy-reference comparison |
+| GET | `/<id>/reference` | Selected reference image |
+| GET/POST | `/<id>/recommendations` | Learning recommendations |
+| GET | `/references*` | Healthy reference library (learner) |
+| * | `/admin/references*` | Admin reference library manager |
+
+### Admin X-Ray Monitor — `/api/admin` (JWT + admin)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/xray-analyses` | Platform-wide X-ray monitor list |
+| GET | `/xray-analyses/evaluation-metrics` | Educational model-evaluation metrics |
+| GET/DELETE | `/xray-analyses/<id>` | Detail / delete |
 
 ### Auth — `/api/auth`
 
@@ -166,6 +260,51 @@ Base URL: `http://localhost:5000`
 | POST/DELETE | `/lessons/<id>/bookmark` | Add/remove bookmark |
 | GET | `/recommendations` | Personalized recommendations |
 | GET | `/weak-topics` | Weak topic detection |
+
+### Body Systems Learning Hub — `/api/learning` (Phases 2–10, JWT)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/body-systems` | List systems + user progress (`q`, `difficulty`, pagination) |
+| GET | `/body-systems/<slug>` | System detail (organs, diseases, courses, quizzes) |
+| GET | `/body-systems/<slug>/organs` | Organs in a system |
+| GET | `/body-systems/<slug>/diseases` | Diseases in a system |
+| POST | `/body-systems/<slug>/start` | Start / resume learning progress |
+| GET/PUT | `/body-systems/<slug>/progress` | Get / update hub progress |
+| GET | `/organs/<slug>` | Organ detail (`?system=` optional) |
+| GET | `/diseases/<slug>` | Disease detail (educational only) |
+| GET | `/hub/search?q=` | Search systems, organs, diseases, courses |
+| GET | `/hub/explorer` | Interactive body explorer catalog (Phase 5) |
+| GET | `/hub/tutor/modes` | AI Tutor mode list (Phase 6) |
+| POST | `/hub/tutor` | Context-grounded AI Tutor (Phase 6) |
+| GET | `/body-systems/<slug>/quizzes` | Linked hub quizzes + best scores (Phase 7) |
+| POST | `/body-systems/<slug>/quizzes/generate` | Auto-generate educational quiz from lesson content (Phase 7) |
+| GET | `/hub/flashcards` | Flashcards (`system`, `organ`, `level`, `favorites`) (Phase 8) |
+| POST | `/hub/flashcards/generate` | Auto-generate basic/advanced/exam decks (Phase 8) |
+| GET | `/hub/flashcards/favorites` | User flashcard favorites (SR-ready) |
+| POST/DELETE | `/hub/flashcards/<id>/favorite` | Favorite / unfavorite |
+| GET | `/body-systems/<slug>/cases` | Hub clinical cases + disease explorer (`organ`, `disease`) (Phase 9) |
+| POST | `/body-systems/<slug>/cases/generate` | Generate educational case simulations (Phase 9) |
+| GET | `/hub/recommendations` | Hub recommendations (`source_type`, `source_id`) — report→hub (Phase 10), xray→hub (Phase 11) |
+| GET | `/hub/progress` | Hub progress summary — overall %, per-system bars, recently studied (Phase 12) |
+| GET | `/hub/certificates` | Educational body-system completion certificates (Phase 13) |
+| GET | `/hub/certificates/<id>` | Hub certificate detail (Phase 13) |
+| GET | `/hub/certificates/<id>/download` | Download hub certificate PDF (Phase 13) |
+
+Admin (JWT + admin): `/api/admin/learning/body-systems*` — CRUD systems, create/update organs, create diseases, link courses/quizzes. Admin UI: `/admin/body-systems` (Phase 14).
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/admin/learning/body-systems` | List systems (`include_inactive`, `q`) |
+| POST | `/api/admin/learning/body-systems` | Create system |
+| GET | `/api/admin/learning/body-systems/<slug>` | Admin detail (includes unpublished organs/diseases) |
+| PUT/PATCH | `/api/admin/learning/body-systems/<slug>` | Update / publish |
+| DELETE | `/api/admin/learning/body-systems/<slug>` | Soft-delete (deactivate) |
+| POST | `/api/admin/learning/body-systems/<slug>/organs` | Create organ |
+| PUT/PATCH | `/api/admin/learning/organs/<organ_slug>` | Update organ |
+| POST | `/api/admin/learning/body-systems/<slug>/diseases` | Create disease |
+| POST | `/api/admin/learning/body-systems/<slug>/courses` | Link LMS course |
+| POST | `/api/admin/learning/body-systems/<slug>/quizzes` | Link LMS quiz |
 
 ### Clinical Cases — `/api/clinical-cases`
 
@@ -264,6 +403,8 @@ gunicorn -w 4 -b 0.0.0.0:5000 "run:app"
 ```
 
 Use the included `Procfile` for Heroku/Railway-style deployments.
+For Docker, use the included `Dockerfile` (Tesseract is pre-installed).
+Ensure Tesseract is available in any non-Docker production environment — see **OCR for image reports** above.
 
 ## License
 
