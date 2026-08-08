@@ -23,6 +23,7 @@ class ReportAnalysis(db.Model):
   report = db.relationship("Report", back_populates="analyses")
 
   def to_dict(self):
+    full = self.full_response or {}
     return {
       "id": self.id,
       "user_id": self.user_id,
@@ -30,9 +31,12 @@ class ReportAnalysis(db.Model):
       "report_text": self.report_text,
       "simple_explanation": self.simple_explanation,
       "abnormal_values": self.abnormal_values,
+      "normal_values": full.get("normal_values"),
       "possible_diseases": self.possible_diseases,
       "medical_terms": self.medical_terms,
       "learning_topics": self.learning_topics,
+      "analysis_mode": full.get("analysis_mode"),
+      "report_type": full.get("report_type"),
       "full_response": self.full_response,
       "created_at": self.created_at.isoformat() if self.created_at else None,
     }
