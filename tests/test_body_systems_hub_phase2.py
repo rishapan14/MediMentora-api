@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
+from app.extensions import db
 from app.helpers.schema_patches import ensure_body_systems_hub_schema
+from app.models.body_system_model import HubDisease, Organ
 
 
 def test_list_body_systems_requires_auth(client, app_ctx):
@@ -78,11 +82,13 @@ def test_start_and_update_progress(client, auth_headers, app_ctx):
 
 def test_admin_create_organ(client, admin_auth_headers, app_ctx):
   ensure_body_systems_hub_schema()
+  suffix = uuid.uuid4().hex[:8]
+  slug = f"spinal-cord-{suffix}"
   response = client.post(
     "/api/admin/learning/body-systems/nervous/organs",
     json={
-      "name": "Spinal Cord",
-      "slug": "spinal-cord",
+      "name": f"Spinal Cord {suffix}",
+      "slug": slug,
       "short_description": "Educational overview of the spinal cord.",
       "location": "spine",
     },
@@ -90,23 +96,30 @@ def test_admin_create_organ(client, admin_auth_headers, app_ctx):
   )
   assert response.status_code in (200, 201), response.get_data(as_text=True)
   data = response.get_json()["data"]
-  assert data["slug"] == "spinal-cord"
+  assert data["slug"] == slug
 
   again = client.post(
     "/api/admin/learning/body-systems/nervous/organs",
-    json={"name": "Spinal Cord", "slug": "spinal-cord"},
+    json={"name": f"Spinal Cord {suffix}", "slug": slug},
     headers=admin_auth_headers,
   )
   assert again.status_code == 409
 
+  row = Organ.query.filter_by(slug=slug).first()
+  if row:
+    db.session.delete(row)
+    db.session.commit()
+
 
 def test_admin_create_disease(client, admin_auth_headers, app_ctx):
   ensure_body_systems_hub_schema()
+  suffix = uuid.uuid4().hex[:8]
+  slug = f"pneumonia-{suffix}"
   response = client.post(
     "/api/admin/learning/body-systems/respiratory/diseases",
     json={
-      "name": "Pneumonia (Educational)",
-      "slug": "pneumonia",
+      "name": f"Pneumonia Educational {suffix}",
+      "slug": slug,
       "organ_slug": "lungs",
       "short_description": "Educational overview of pneumonia patterns for learners.",
       "content_json": {
@@ -118,10 +131,15 @@ def test_admin_create_disease(client, admin_auth_headers, app_ctx):
     headers=admin_auth_headers,
   )
   assert response.status_code in (200, 201), response.get_data(as_text=True)
-  assert response.get_json()["data"]["slug"] == "pneumonia"
+  assert response.get_json()["data"]["slug"] == slug
 
   student_get = client.get(
-    "/api/learning/diseases/pneumonia?system=respiratory",
+    f"/api/learning/diseases/{slug}?system=respiratory",
     headers=admin_auth_headers,
   )
   assert student_get.status_code == 200
+
+  row = HubDisease.query.filter_by(slug=slug).first()
+  if row:
+    db.session.delete(row)
+    db.session.commit()

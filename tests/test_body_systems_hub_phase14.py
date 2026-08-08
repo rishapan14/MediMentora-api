@@ -12,7 +12,8 @@ from app.services.body_systems.admin_service import AdminBodySystemService
 
 def test_admin_list_and_create_body_system(client, admin_auth_headers, app_ctx):
   ensure_body_systems_hub_schema()
-  slug = f"phase14-test-{uuid.uuid4().hex[:8]}"
+  suffix = uuid.uuid4().hex[:8]
+  slug = f"phase14-test-{suffix}"
 
   listed = client.get(
     "/api/admin/learning/body-systems",
@@ -25,7 +26,7 @@ def test_admin_list_and_create_body_system(client, admin_auth_headers, app_ctx):
   created = client.post(
     "/api/admin/learning/body-systems",
     json={
-      "name": "Phase14 Test System",
+      "name": f"Phase14 Test System {suffix}",
       "slug": slug,
       "short_description": "Admin panel test system",
       "difficulty": "beginner",
@@ -54,7 +55,10 @@ def test_admin_list_and_create_body_system(client, admin_auth_headers, app_ctx):
   assert detail.status_code == 200
   assert "organs" in detail.get_json()["data"]
 
-  client.delete(f"/api/admin/learning/body-systems/{slug}", headers=admin_auth_headers)
+  row = BodySystem.query.filter_by(slug=slug).first()
+  if row:
+    db.session.delete(row)
+    db.session.commit()
 
 
 def test_admin_get_includes_unpublished_organs(client, admin_auth_headers, app_ctx):
