@@ -1,46 +1,23 @@
-"""Text extraction from PDF and images (OCR)."""
+"""Text extraction from PDF and images — delegates to app.utils.ocr."""
 
-import os
+from app.utils.ocr import OCRResult, extract_text
+
+__all__ = ["ReportExtractionService", "OCRResult", "extract_text"]
 
 
 class ReportExtractionService:
-  """Extract text from uploaded medical reports."""
+    """Extract text from uploaded medical reports."""
 
-  @staticmethod
-  def extract_from_pdf(file_path):
-    try:
-      from pypdf import PdfReader
-    except ImportError:
-      raise RuntimeError("pypdf is required for PDF extraction.")
+    @staticmethod
+    def extract_from_pdf(file_path: str) -> OCRResult:
+        from app.utils.ocr import extract_text_from_pdf
+        return extract_text_from_pdf(file_path)
 
-    if not os.path.exists(file_path):
-      raise FileNotFoundError("PDF file not found.")
+    @staticmethod
+    def extract_from_image(file_path: str) -> OCRResult:
+        from app.utils.ocr import extract_text_from_image
+        return extract_text_from_image(file_path)
 
-    reader = PdfReader(file_path)
-    pages = []
-    for page in reader.pages:
-      text = page.extract_text() or ""
-      pages.append(text)
-    return "\n".join(pages).strip()
-
-  @staticmethod
-  def extract_from_image(file_path):
-    try:
-      from PIL import Image
-      import pytesseract
-    except ImportError:
-      raise RuntimeError("Pillow and pytesseract are required for OCR.")
-
-    if not os.path.exists(file_path):
-      raise FileNotFoundError("Image file not found.")
-
-    image = Image.open(file_path)
-    return pytesseract.image_to_string(image).strip()
-
-  @classmethod
-  def extract_text(cls, file_path, file_type):
-    if file_type == "pdf":
-      return cls.extract_from_pdf(file_path)
-    if file_type == "image":
-      return cls.extract_from_image(file_path)
-    raise ValueError("Unsupported file type for extraction.")
+    @classmethod
+    def extract_text(cls, file_path: str, file_type: str) -> OCRResult:
+        return extract_text(file_path, file_type)
