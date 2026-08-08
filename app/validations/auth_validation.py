@@ -12,12 +12,12 @@ def validate_register(data):
   if not data:
     return ["Request body is required."]
 
-  email = data.get("email")
-  if not email or str(email).strip() == "":
+  email = str(data.get("email", "")).strip().lower()
+  if not email:
     errors.append("email is required.")
-  elif not EMAIL_REGEX.match(str(email).strip()):
+  elif not EMAIL_REGEX.match(email):
     errors.append("Invalid email format.")
-  elif User.query.filter_by(email=str(email).strip().lower()).first():
+  elif User.query.filter_by(email=email).first():
     errors.append("Email address already exists.")
 
   password = data.get("password")
@@ -25,6 +25,12 @@ def validate_register(data):
     errors.append("password is required.")
   elif len(str(password)) < 6:
     errors.append("password must be at least 6 characters.")
+
+  full_name = str(data.get("full_name", "")).strip()
+  if not full_name:
+    errors.append("full_name is required.")
+  elif len(full_name) < 2:
+    errors.append("full_name must be at least 2 characters.")
 
   role = data.get("role")
   if role and role not in VALID_ROLES:
