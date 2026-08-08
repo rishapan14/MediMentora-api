@@ -9,9 +9,78 @@ from app.models.user_model import User
 from app.constants import ROLE_ADMIN, ROLE_DOCTOR, ROLE_NURSE, ROLE_MEDICAL_STUDENT
 
 
+def seed_clinical_cases_if_needed():
+  """Add demo clinical cases when the library is empty or incomplete."""
+  if ClinicalCase.query.count() >= 4:
+    return
+
+  doctor = User.query.filter_by(email="doctor@clinical.com").first()
+  nurse = User.query.filter_by(email="nurse@clinical.com").first()
+  creator = doctor or nurse or User.query.first()
+  if not creator:
+    return
+
+  existing_titles = {c.title for c in ClinicalCase.query.all()}
+  candidates = [
+    ClinicalCase(
+      created_by=creator.id,
+      title="Chest Pain in a 55-year-old Male",
+      disease="Acute Coronary Syndrome",
+      symptoms=["Chest pain", "Shortness of breath", "Diaphoresis"],
+      diagnosis="STEMI suspected based on ECG changes",
+      treatment="Aspirin, nitroglycerin, urgent cardiology referral",
+      difficulty="medium",
+      speciality="Cardiology",
+      description="Patient presents with crushing chest pain radiating to left arm.",
+    ),
+    ClinicalCase(
+      created_by=creator.id,
+      title="Sudden Weakness in a 68-year-old Female",
+      disease="Ischemic Stroke",
+      symptoms=["Facial droop", "Arm weakness", "Slurred speech"],
+      diagnosis="Acute ischemic stroke, NIHSS 8",
+      treatment="tPA eligibility assessment, stroke unit admission, aspirin after bleed ruled out",
+      difficulty="hard",
+      speciality="Neurology",
+      description="Patient presents with sudden onset left-sided weakness and aphasia.",
+    ),
+    ClinicalCase(
+      created_by=creator.id,
+      title="Post-operative Wound Care",
+      disease="Surgical Site Infection",
+      symptoms=["Erythema", "Purulent drainage", "Fever"],
+      diagnosis="Superficial surgical site infection",
+      treatment="Wound culture, antibiotics, dressing changes, monitor vitals",
+      difficulty="easy",
+      speciality="Nursing Fundamentals",
+      description="Day 4 post-appendectomy patient with increasing wound erythema and low-grade fever.",
+    ),
+    ClinicalCase(
+      created_by=creator.id,
+      title="Pediatric Fever and Rash",
+      disease="Viral Exanthem",
+      symptoms=["Fever", "Maculopapular rash", "Irritability"],
+      diagnosis="Likely viral illness; measles ruled out by vaccination history",
+      treatment="Supportive care, antipyretics, hydration, isolation precautions as needed",
+      difficulty="medium",
+      speciality="Pediatrics",
+      description="3-year-old with 2 days of fever followed by spreading rash.",
+    ),
+  ]
+
+  added = [c for c in candidates if c.title not in existing_titles]
+  if not added:
+    return
+
+  db.session.add_all(added)
+  db.session.commit()
+  print(f"Added {len(added)} clinical case(s).")
+
+
 def seed_all():
   if User.query.filter_by(email="admin@clinical.com").first():
     print("Seed data already exists. Skipping.")
+    seed_clinical_cases_if_needed()
     return
 
   # Users
@@ -34,9 +103,12 @@ def seed_all():
   course = Course(
     title="Fundamentals of Clinical Nursing",
     description="Core nursing concepts for beginners.",
-    speciality="Nursing",
-    difficulty="easy",
+    speciality="Nursing Fundamentals",
+    difficulty="beginner",
     duration_hours=10,
+    instructor_name="Nurse Emily",
+    is_published=True,
+    certificate_eligible=True,
   )
   db.session.add(course)
   db.session.flush()
@@ -62,12 +134,49 @@ def seed_all():
   )
   db.session.add(case)
 
+  extra_cases = [
+    ClinicalCase(
+      created_by=doctor.id,
+      title="Sudden Weakness in a 68-year-old Female",
+      disease="Ischemic Stroke",
+      symptoms=["Facial droop", "Arm weakness", "Slurred speech"],
+      diagnosis="Acute ischemic stroke, NIHSS 8",
+      treatment="tPA eligibility assessment, stroke unit admission, aspirin after bleed ruled out",
+      difficulty="hard",
+      speciality="Neurology",
+      description="Patient presents with sudden onset left-sided weakness and aphasia.",
+    ),
+    ClinicalCase(
+      created_by=nurse.id,
+      title="Post-operative Wound Care",
+      disease="Surgical Site Infection",
+      symptoms=["Erythema", "Purulent drainage", "Fever"],
+      diagnosis="Superficial surgical site infection",
+      treatment="Wound culture, antibiotics, dressing changes, monitor vitals",
+      difficulty="easy",
+      speciality="Nursing Fundamentals",
+      description="Day 4 post-appendectomy patient with increasing wound erythema and low-grade fever.",
+    ),
+    ClinicalCase(
+      created_by=doctor.id,
+      title="Pediatric Fever and Rash",
+      disease="Viral Exanthem",
+      symptoms=["Fever", "Maculopapular rash", "Irritability"],
+      diagnosis="Likely viral illness; measles ruled out by vaccination history",
+      treatment="Supportive care, antipyretics, hydration, isolation precautions as needed",
+      difficulty="medium",
+      speciality="Pediatrics",
+      description="3-year-old with 2 days of fever followed by spreading rash.",
+    ),
+  ]
+  db.session.add_all(extra_cases)
+
   # Quiz
   quiz = Quiz(
     title="Nursing Fundamentals Quiz",
     description="Test your basic nursing knowledge.",
     difficulty="easy",
-    speciality="Nursing",
+    speciality="Nursing Fundamentals",
     created_by=doctor.id,
   )
   db.session.add(quiz)
@@ -94,7 +203,16 @@ def seed_all():
   sim = Simulation(
     title="Diabetic Patient with Hyperglycemia",
     scenario="A 62-year-old diabetic patient presents with polyuria, polydipsia, and blood glucose of 380 mg/dL.",
-    patient_data={"age": 62, "glucose": 380, "history": "Type 2 Diabetes"},
+    patient_data={
+      "age": 62,
+      "gender": "Male",
+      "glucose": 380,
+      "history": "Type 2 Diabetes",
+      "vitals": [
+        {"label": "Glucose", "value": "380 mg/dL", "status": "abnormal"},
+        {"label": "Age", "value": "62 years", "status": "normal"},
+      ],
+    },
     correct_diagnosis="Hyperglycemic crisis",
     correct_treatment="IV fluids, insulin therapy, electrolyte monitoring",
     diagnosis_options=["Hypoglycemia", "Hyperglycemic crisis", "DKA only", "UTI"],
