@@ -1,6 +1,6 @@
 """Quiz scoring and leaderboard logic."""
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.extensions import db
 from app.models.quiz_model import Question, Quiz, Result
@@ -62,6 +62,8 @@ class QuizService:
         func.count(Result.id).label("attempts"),
       )
       .join(Result, Result.user_id == User.id)
+      .join(Quiz, Quiz.id == Result.quiz_id)
+      .filter(or_(Quiz.quiz_type.is_(None), Quiz.quiz_type != "generated_learning"))
       .group_by(User.id, User.full_name, User.email)
       .order_by(func.max(Result.score).desc())
     )
