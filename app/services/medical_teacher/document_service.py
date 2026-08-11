@@ -7,13 +7,10 @@ No chapter/module AI generation here (those are later modules).
 from __future__ import annotations
 
 import logging
-import os
-import uuid
 from dataclasses import dataclass, field
 
 from flask import current_app
 from werkzeug.datastructures import FileStorage
-from werkzeug.utils import secure_filename
 
 from app.extensions import db
 from app.models.book_model import (
@@ -24,6 +21,7 @@ from app.models.book_model import (
   Book,
 )
 from app.services.medical_teacher.document_extractor import DocumentExtractor
+from app.services.medical_teacher.storage_service import DocumentStorage, StoredDocument
 from app.services.medical_teacher.document_validator import TeacherDocumentValidator, ValidatedDocument
 from app.utils import utc_now
 
@@ -37,6 +35,7 @@ class BookUploadItem:
   file_type: str
   file_size: int
   status: str
+  duplicate: bool = False
 
   def to_dict(self) -> dict:
     return {
@@ -45,6 +44,7 @@ class BookUploadItem:
       "file_type": self.file_type,
       "file_size": self.file_size,
       "status": self.status,
+      "duplicate": self.duplicate,
     }
 
 
@@ -90,14 +90,36 @@ class DocumentService:
       result.errors = validation.error_messages()
       return result
 
-    upload_dir = cfg["TEACHER_UPLOAD_FOLDER"]
-    os.makedirs(upload_dir, exist_ok=True)
-    saved_paths: list[str] = []
+    storage = DocumentStorage.backend()
+    saved_documents: list[StoredDocument] = []
 
     try:
       for validated in validation.files:
-        book = cls._persist_one(user_id, validated, upload_dir, title)
-        saved_paths.append(book.file_path)
+        existing = Book.query.filter_by(
+          user_id=user_id,
+          content_hash=validated.content_hash,
+        ).order_by(Book.created_at.desc()).first()
+        duplicate = existing is not None
+        if existing:
+          try:
+            DocumentStorage.for_book(existing).resolve_local_path(existing)
+            book = existing
+          except FileNotFoundError:
+            stored = storage.save(validated)
+            saved_documents.append(stored)
+            existing.stored_filename = stored.stored_filename[:255]
+            existing.file_path = stored.local_path
+            existing.storage_backend = stored.backend
+            existing.storage_key = stored.storage_key
+            existing.file_size = validated.size_bytes
+            existing.mime_type = validated.mime_type
+            existing.status = BOOK_STATUS_UPLOADED
+            existing.error_message = None
+            existing.updated_at = utc_now()
+            book = existing
+        else:
+          book, stored = cls._persist_one(user_id, validated, storage, title)
+          saved_documents.append(stored)
         result.books.append(
           BookUploadItem(
             book_id=book.id,
@@ -105,19 +127,19 @@ class DocumentService:
             file_type=book.file_type,
             file_size=book.file_size or 0,
             status=book.status,
+            duplicate=duplicate,
           )
         )
       db.session.commit()
       result.success = True
-      result.files_saved = len(result.books)
+      result.files_saved = len([item for item in result.books if not item.duplicate])
       return result
     except Exception:
       db.session.rollback()
-      for path in saved_paths:
+      for stored in saved_documents:
         try:
-          if os.path.isfile(path):
-            os.remove(path)
-        except OSError:
+          storage.delete_stored(stored)
+        except Exception:
           pass
       logger.exception("Failed to upload medical teacher documents")
       result.errors.append("Failed to save uploaded documents.")
@@ -129,21 +151,20 @@ class DocumentService:
     cls,
     user_id: int,
     validated: ValidatedDocument,
-    upload_dir: str,
+    storage,
     title: str | None,
-  ) -> Book:
-    safe_name = secure_filename(validated.filename) or f"document.{validated.extension}"
-    stored = f"{uuid.uuid4().hex}_{safe_name}"
-    dest = os.path.join(upload_dir, stored)
-    validated.storage.save(dest)
+  ) -> tuple[Book, StoredDocument]:
+    stored = storage.save(validated)
 
     display_title = (title or "").strip() or cls._title_from_filename(validated.filename)
     book = Book(
       user_id=user_id,
       title=display_title[:300],
       original_filename=validated.filename[:255],
-      stored_filename=stored[:255],
-      file_path=dest,
+      stored_filename=stored.stored_filename[:255],
+      file_path=stored.local_path,
+      storage_backend=stored.backend,
+      storage_key=stored.storage_key,
       file_type=validated.file_type,
       mime_type=validated.mime_type,
       file_size=validated.size_bytes,
@@ -152,10 +173,15 @@ class DocumentService:
     )
     db.session.add(book)
     db.session.flush()
-    return book
+    return book, stored
 
   @classmethod
-  def extract_document(cls, book_id: int, user_id: int | None = None) -> Book:
+  def extract_document(
+    cls,
+    book_id: int,
+    user_id: int | None = None,
+    progress_callback=None,
+  ) -> Book:
     """Run text extraction for a stored book and update DB fields."""
     query = Book.query.filter_by(id=book_id)
     if user_id is not None:
@@ -164,9 +190,11 @@ class DocumentService:
     if not book:
       raise LookupError("Book not found.")
 
-    if not book.file_path or not os.path.isfile(book.file_path):
+    try:
+      local_path = DocumentStorage.for_book(book).resolve_local_path(book)
+    except FileNotFoundError:
       book.status = BOOK_STATUS_FAILED
-      book.error_message = "Stored file is missing from disk."
+      book.error_message = "Stored document is unavailable."
       db.session.commit()
       raise FileNotFoundError(book.error_message)
 
@@ -175,7 +203,11 @@ class DocumentService:
     book.updated_at = utc_now()
     db.session.commit()
 
-    extraction = DocumentExtractor.extract(book.file_path, book.file_type)
+    extraction = DocumentExtractor.extract(
+      local_path,
+      book.file_type,
+      progress_callback=progress_callback,
+    )
     if not extraction.success:
       book.status = BOOK_STATUS_FAILED
       book.error_message = extraction.message
@@ -255,14 +287,13 @@ class DocumentService:
     book = cls.get_book(book_id, user_id=user_id)
     if not book:
       return False
-    path = book.file_path
+    storage = DocumentStorage.for_book(book)
     db.session.delete(book)
     db.session.commit()
-    if path and os.path.isfile(path):
-      try:
-        os.remove(path)
-      except OSError:
-        logger.warning("Could not delete book file %s", path)
+    try:
+      storage.delete(book)
+    except Exception:
+      logger.warning("Could not delete stored document for book %s", book_id)
     return True
 
   @staticmethod
