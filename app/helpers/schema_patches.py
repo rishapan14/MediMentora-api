@@ -206,6 +206,7 @@ def ensure_learning_schema() -> None:
             CourseBookmark,
             CourseCategory,
             CourseModule,
+            CourseTopic,
             CourseProgress,
             CourseReview,
             LessonResource,
@@ -217,6 +218,7 @@ def ensure_learning_schema() -> None:
         for table in (
             CourseCategory.__table__,
             CourseModule.__table__,
+            CourseTopic.__table__,
             LessonResource.__table__,
             LessonVideo.__table__,
             CourseProgress.__table__,
@@ -242,6 +244,51 @@ def ensure_learning_schema() -> None:
                 ("rating_count", "INT NULL"),
                 ("enrollment_count", "INT NULL"),
                 ("certificate_eligible", "BOOLEAN NULL"),
+                ("owner_user_id", "INT NULL"),
+                ("source_book_id", "INT NULL"),
+                ("origin", "VARCHAR(40) NOT NULL DEFAULT 'manual'"),
+                ("generation_status", "VARCHAR(30) NULL"),
+                ("lesson_generation_status", "VARCHAR(30) NULL"),
+                ("question_generation_status", "VARCHAR(30) NULL"),
+                ("quiz_generation_status", "VARCHAR(30) NULL"),
+                ("flashcard_generation_status", "VARCHAR(30) NULL"),
+                ("source_structure_version", "VARCHAR(20) NULL"),
+                ("source_json", "JSON NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_columns_if_missing(
+            inspector,
+            "course_modules",
+            (
+                ("parent_module_id", "INT NULL"),
+                ("structure_type", "VARCHAR(30) NOT NULL DEFAULT 'module'"),
+                ("source_node_id", "VARCHAR(80) NULL"),
+                ("page_start", "INT NULL"),
+                ("page_end", "INT NULL"),
+                ("source_json", "JSON NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "courses",
+            (
+                (("owner_user_id",), "ix_courses_owner_user_id", False),
+                (("source_book_id",), "uq_courses_source_book_id", True),
+                (("origin",), "ix_courses_origin", False),
+                (("generation_status",), "ix_courses_generation_status", False),
+                (("question_generation_status",), "ix_courses_question_generation_status", False),
+                (("quiz_generation_status",), "ix_courses_quiz_generation_status", False),
+                (("flashcard_generation_status",), "ix_courses_flashcard_generation_status", False),
+            ),
+        )
+        _add_indexes_if_missing(
+            inspector,
+            "course_modules",
+            (
+                (("parent_module_id",), "ix_course_modules_parent_module_id", False),
+                (("course_id", "source_node_id"), "uq_course_module_source_node", True),
             ),
         )
         _add_columns_if_missing(
@@ -249,9 +296,27 @@ def ensure_learning_schema() -> None:
             "lessons",
             (
                 ("module_id", "INT NULL"),
+                ("topic_id", "INT NULL"),
                 ("summary", "TEXT NULL"),
                 ("is_published", "BOOLEAN NULL"),
                 ("updated_at", "DATETIME NULL"),
+                ("content_json", "JSON NULL"),
+                ("source_json", "JSON NULL"),
+                ("source_hash", "VARCHAR(64) NULL"),
+                ("origin", "VARCHAR(40) NOT NULL DEFAULT 'manual'"),
+                ("generation_method", "VARCHAR(40) NULL"),
+                ("difficulty_level", "VARCHAR(20) NULL"),
+                ("generated_at", "DATETIME NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "lessons",
+            (
+                (("topic_id",), "uq_lessons_topic_id", True),
+                (("source_hash",), "ix_lessons_source_hash", False),
+                (("origin",), "ix_lessons_origin", False),
             ),
         )
         _add_columns_if_missing(
@@ -262,6 +327,15 @@ def ensure_learning_schema() -> None:
                 ("course_id", "INT NULL"),
                 ("lesson_id", "INT NULL"),
                 ("passing_score", "FLOAT NULL"),
+                ("source_book_id", "INT NULL"),
+                ("source_question_bank_id", "INT NULL"),
+                ("owner_user_id", "INT NULL"),
+                ("scope_type", "VARCHAR(30) NULL"),
+                ("scope_id", "INT NULL"),
+                ("question_mode", "VARCHAR(30) NULL"),
+                ("requested_question_count", "INT NULL"),
+                ("generation_hash", "VARCHAR(64) NULL"),
+                ("generated_at", "DATETIME NULL"),
             ),
         )
         _add_columns_if_missing(
@@ -271,6 +345,45 @@ def ensure_learning_schema() -> None:
                 ("question_type", "VARCHAR(40) NULL"),
                 ("image_url", "VARCHAR(500) NULL"),
                 ("order_index", "INT NULL"),
+                ("user_id", "INT NULL"),
+                ("book_id", "INT NULL"),
+                ("course_id", "INT NULL"),
+                ("module_id", "INT NULL"),
+                ("topic_id", "INT NULL"),
+                ("lesson_id", "INT NULL"),
+                ("difficulty", "VARCHAR(20) NULL"),
+                ("priority_level", "VARCHAR(20) NULL"),
+                ("priority_score", "INT NULL"),
+                ("priority_reason", "VARCHAR(500) NULL"),
+                ("learning_objective", "VARCHAR(500) NULL"),
+                ("source_json", "JSON NULL"),
+                ("source_hash", "VARCHAR(64) NULL"),
+                ("origin", "VARCHAR(40) NULL"),
+                ("generation_method", "VARCHAR(40) NULL"),
+                ("generated_at", "DATETIME NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "quizzes",
+            (
+                (("source_book_id",), "ix_quizzes_source_book_id", False),
+                (("source_question_bank_id",), "ix_quizzes_source_question_bank_id", False),
+                (("owner_user_id",), "ix_quizzes_owner_user_id", False),
+                (("scope_type", "scope_id"), "ix_quizzes_scope", False),
+                (("generation_hash",), "ix_quizzes_generation_hash", False),
+            ),
+        )
+        _add_indexes_if_missing(
+            inspector,
+            "questions",
+            (
+                (("book_id", "lesson_id"), "ix_questions_book_lesson", False),
+                (("topic_id", "difficulty"), "ix_questions_topic_difficulty", False),
+                (("priority_level",), "ix_questions_priority_level", False),
+                (("source_hash",), "ix_questions_source_hash", False),
+                (("origin",), "ix_questions_origin", False),
             ),
         )
         _add_columns_if_missing(
@@ -279,6 +392,21 @@ def ensure_learning_schema() -> None:
             (
                 ("passed", "BOOLEAN NULL"),
                 ("attempt_number", "INT NULL"),
+                ("book_id", "INT NULL"),
+                ("course_id", "INT NULL"),
+                ("time_taken_seconds", "INT NULL"),
+                ("topic_breakdown_json", "JSON NULL"),
+                ("review_json", "JSON NULL"),
+                ("quiz_mode", "VARCHAR(30) NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "results",
+            (
+                (("book_id", "user_id"), "ix_results_book_user", False),
+                (("course_id", "user_id"), "ix_results_course_user", False),
             ),
         )
 
@@ -308,6 +436,27 @@ def _add_columns_if_missing(inspector, table_name: str, columns: tuple[tuple[str
                 logger.info("Applied LMS schema patch: %s", stmt)
             except Exception as exc:
                 logger.warning("LMS schema patch skipped (%s): %s", stmt, exc)
+
+
+def _add_indexes_if_missing(
+    inspector,
+    table_name: str,
+    specs: tuple[tuple[tuple[str, ...], str, bool], ...],
+) -> None:
+    if table_name not in inspector.get_table_names():
+        return
+    existing = {item["name"] for item in inspector.get_indexes(table_name)}
+    with db.engine.begin() as conn:
+        for columns, name, unique in specs:
+            if name in existing:
+                continue
+            keyword = "UNIQUE INDEX" if unique else "INDEX"
+            statement = f"CREATE {keyword} {name} ON {table_name} ({', '.join(columns)})"
+            try:
+                conn.execute(text(statement))
+                logger.info("Applied LMS schema index: %s", statement)
+            except Exception as exc:
+                logger.warning("LMS schema index skipped (%s): %s", statement, exc)
 
 
 def _slugify(name: str) -> str:
@@ -407,14 +556,67 @@ def _backfill_learning_booleans() -> None:
 
 
 def ensure_medical_teacher_schema() -> None:
-    """Create AI Medical Teacher tables (Module 1 books, Module 2 chapters)."""
+    """Create AI Medical Teacher tables (books, chapters, processing jobs)."""
     try:
-        from app.models.book_model import Book, Chapter  # noqa: F401
+        from app.models.book_model import Book, Chapter, DocumentProcessingJob  # noqa: F401
+        from app.models.rag_model import ChunkEmbedding, DocumentChunk  # noqa: F401
+        from app.models.tutor_model import TutorMessage, TutorSession  # noqa: F401
+        from app.models.adaptive_learning_model import LearningTopicMastery  # noqa: F401
+        from app.models.learning_activity_model import LearningActivity  # noqa: F401
 
         Book.__table__.create(bind=db.engine, checkfirst=True)
         Chapter.__table__.create(bind=db.engine, checkfirst=True)
+        DocumentProcessingJob.__table__.create(bind=db.engine, checkfirst=True)
+        DocumentChunk.__table__.create(bind=db.engine, checkfirst=True)
+        ChunkEmbedding.__table__.create(bind=db.engine, checkfirst=True)
+        TutorSession.__table__.create(bind=db.engine, checkfirst=True)
+        TutorMessage.__table__.create(bind=db.engine, checkfirst=True)
+        LearningTopicMastery.__table__.create(bind=db.engine, checkfirst=True)
+        LearningActivity.__table__.create(bind=db.engine, checkfirst=True)
 
         inspector = inspect(db.engine)
+        _add_columns_if_missing(
+            inspector,
+            "tutor_sessions",
+            (
+                ("session_type", "VARCHAR(30) NOT NULL DEFAULT 'tutor'"),
+                ("topic_id", "INT NULL"),
+                ("difficulty", "VARCHAR(20) NULL"),
+                ("current_step", "INT NOT NULL DEFAULT 0"),
+                ("total_steps", "INT NOT NULL DEFAULT 0"),
+                ("correct_answers", "INT NOT NULL DEFAULT 0"),
+                ("incorrect_answers", "INT NOT NULL DEFAULT 0"),
+                ("plan_json", "JSON NULL"),
+                ("state_json", "JSON NULL"),
+                ("completed_at", "DATETIME NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "tutor_sessions",
+            (
+                (("session_type",), "ix_tutor_sessions_session_type", False),
+                (("topic_id",), "ix_tutor_sessions_topic_id", False),
+                (("user_id", "book_id", "session_type", "updated_at"), "ix_tutor_sessions_owner_book_type_updated", False),
+            ),
+        )
+
+        inspector = inspect(db.engine)
+        _add_columns_if_missing(
+            inspector,
+            "books",
+            (
+                ("storage_backend", "VARCHAR(40) NOT NULL DEFAULT 'local'"),
+                ("storage_key", "VARCHAR(500) NULL"),
+                ("rag_status", "VARCHAR(30) NULL"),
+                ("rag_provider", "VARCHAR(40) NULL"),
+                ("rag_model", "VARCHAR(120) NULL"),
+                ("rag_chunk_count", "INT NULL"),
+                ("rag_indexed_at", "DATETIME NULL"),
+                ("rag_error", "VARCHAR(500) NULL"),
+            ),
+        )
         _add_columns_if_missing(
             inspector,
             "books",
@@ -425,7 +627,22 @@ def ensure_medical_teacher_schema() -> None:
                 ("parsed_at", "DATETIME NULL"),
             ),
         )
-        logger.info("Medical Teacher schema verified (books, chapters).")
+        with db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE books SET storage_backend = 'local' "
+                    "WHERE storage_backend IS NULL OR storage_backend = ''"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE books SET storage_key = stored_filename "
+                    "WHERE storage_key IS NULL OR storage_key = ''"
+                )
+            )
+        logger.info(
+            "Medical Teacher schema verified (documents, tutor, adaptive mastery, and learning activity)."
+        )
     except Exception:
         logger.exception("Failed to ensure medical teacher schema")
 
@@ -582,6 +799,48 @@ def ensure_body_systems_hub_schema() -> None:
                 ("repetitions", "INT NULL"),
                 ("next_review_at", "DATETIME NULL"),
                 ("last_reviewed_at", "DATETIME NULL"),
+                ("status", "VARCHAR(30) NULL"),
+                ("correct_count", "INT NULL"),
+                ("incorrect_count", "INT NULL"),
+                ("review_count", "INT NULL"),
+                ("last_rating", "VARCHAR(30) NULL"),
+            ),
+        )
+        _add_columns_if_missing(
+            inspector,
+            "hub_flashcards",
+            (
+                ("owner_user_id", "INT NULL"),
+                ("book_id", "INT NULL"),
+                ("course_id", "INT NULL"),
+                ("module_id", "INT NULL"),
+                ("topic_id", "INT NULL"),
+                ("source_json", "JSON NULL"),
+                ("source_hash", "VARCHAR(64) NULL"),
+                ("generation_hash", "VARCHAR(64) NULL"),
+                ("origin", "VARCHAR(40) NULL"),
+                ("generation_method", "VARCHAR(40) NULL"),
+                ("generated_at", "DATETIME NULL"),
+            ),
+        )
+        inspector = inspect(db.engine)
+        _add_indexes_if_missing(
+            inspector,
+            "hub_flashcards",
+            (
+                (("book_id", "owner_user_id"), "ix_hub_flashcards_book_owner", False),
+                (("book_id", "lesson_id"), "ix_hub_flashcards_book_lesson", False),
+                (("topic_id", "card_level"), "ix_hub_flashcards_topic_level", False),
+                (("generation_hash",), "ix_hub_flashcards_generation_hash", False),
+                (("origin",), "ix_hub_flashcards_origin", False),
+            ),
+        )
+        _add_indexes_if_missing(
+            inspector,
+            "hub_flashcard_favorites",
+            (
+                (("user_id", "status"), "ix_hub_flashcard_reviews_user_status", False),
+                (("user_id", "next_review_at"), "ix_hub_flashcard_reviews_user_due", False),
             ),
         )
         _add_columns_if_missing(
