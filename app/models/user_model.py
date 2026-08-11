@@ -29,7 +29,12 @@ class User(db.Model):
   recommendations = db.relationship("Recommendation", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   progress_records = db.relationship("Progress", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   clinical_cases = db.relationship("ClinicalCase", back_populates="creator", lazy="dynamic")
-  quizzes_created = db.relationship("Quiz", back_populates="creator", lazy="dynamic")
+  quizzes_created = db.relationship(
+    "Quiz",
+    back_populates="creator",
+    lazy="dynamic",
+    foreign_keys="Quiz.created_by",
+  )
   simulation_attempts = db.relationship("SimulationAttempt", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   quiz_results = db.relationship("Result", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
   certificates = db.relationship("Certificate", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
