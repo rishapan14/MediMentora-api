@@ -1,4 +1,4 @@
-from flask import request
+from flask import current_app, request
 from flask_jwt_extended import current_user
 from sqlalchemy import or_
 
@@ -35,13 +35,27 @@ def list_categories():
 
 # --- Courses ---
 
+def _accessible_course(course_id: int) -> Course | None:
+  return Course.query.filter(
+    Course.id == course_id,
+    or_(
+      Course.owner_user_id == current_user.id,
+      Course.is_published.is_(True),
+      Course.is_published.is_(None),
+    ),
+  ).first()
+
 def list_courses():
   speciality = (request.args.get("speciality") or request.args.get("category") or "").strip()
   difficulty = (request.args.get("difficulty") or "").strip()
   search = (request.args.get("search") or request.args.get("q") or "").strip()
 
   query = Course.query.filter(
-    or_(Course.is_published.is_(True), Course.is_published.is_(None))
+    or_(
+      Course.owner_user_id == current_user.id,
+      Course.is_published.is_(True),
+      Course.is_published.is_(None),
+    )
   )
 
   if speciality:
@@ -103,7 +117,7 @@ def list_courses():
 
 
 def get_course(course_id):
-  course = Course.query.get(course_id)
+  course = _accessible_course(course_id)
   if not course:
     return error_response("Course not found.", 404)
   payload = course.to_dict(include_lessons=True, include_modules=True)
@@ -197,6 +211,8 @@ def delete_course(course_id):
 # --- Lessons ---
 
 def list_lessons(course_id):
+  if not _accessible_course(course_id):
+    return error_response("Course not found.", 404)
   lessons = Lesson.query.filter_by(course_id=course_id).order_by(Lesson.order_index).all()
   return success_response(
     "Lessons retrieved.",
@@ -206,7 +222,7 @@ def list_lessons(course_id):
 
 def get_lesson(lesson_id):
   lesson = Lesson.query.get(lesson_id)
-  if not lesson:
+  if not lesson or not _accessible_course(lesson.course_id):
     return error_response("Lesson not found.", 404)
   completed = CompletedLesson.query.filter_by(user_id=current_user.id, lesson_id=lesson_id).first()
   payload = lesson.to_dict(include_media=True)
@@ -274,7 +290,8 @@ def delete_lesson(lesson_id):
 # --- Bookmarks ---
 
 def add_bookmark(lesson_id):
-  if not Lesson.query.get(lesson_id):
+  lesson = Lesson.query.get(lesson_id)
+  if not lesson or not _accessible_course(lesson.course_id):
     return error_response("Lesson not found.", 404)
 
   existing = LessonBookmark.query.filter_by(user_id=current_user.id, lesson_id=lesson_id).first()
@@ -305,18 +322,20 @@ def list_bookmarks():
 
 def complete_lesson(lesson_id):
   lesson = Lesson.query.get(lesson_id)
-  if not lesson:
+  if not lesson or not _accessible_course(lesson.course_id):
     return error_response("Lesson not found.", 404)
 
   existing = CompletedLesson.query.filter_by(user_id=current_user.id, lesson_id=lesson_id).first()
   newly_completed = False
+  activity_record = existing
   if not existing:
     record = CompletedLesson(user_id=current_user.id, lesson_id=lesson_id)
     db.session.add(record)
     db.session.commit()
+    activity_record = record
     newly_completed = True
 
-  minutes = int(lesson.duration_minutes or 15) if newly_completed else 0
+  minutes = int(lesson.duration_minutes or 0) if newly_completed else 0
   progress = LearningService.update_learning_progress(current_user.id, minutes_delta=minutes)
   course_progress = LearningService.update_course_progress(
     current_user.id,
@@ -324,6 +343,29 @@ def complete_lesson(lesson_id):
     last_lesson_id=lesson_id,
     minutes_delta=minutes,
   )
+  if lesson.course and lesson.course.source_book_id:
+    try:
+      from app.services.medical_teacher.adaptive_learning_service import AdaptiveLearningService
+      AdaptiveLearningService.refresh_book(lesson.course.source_book_id, current_user.id)
+    except Exception:
+      current_app.logger.exception("Adaptive topic mastery refresh failed after lesson completion.")
+  try:
+    from app.services.learning_dashboard_service import LearningDashboardService
+    LearningDashboardService.record_activity(
+      current_user.id,
+      "lesson_completed",
+      str(activity_record.id),
+      f"Completed {lesson.title}",
+      book_id=lesson.course.source_book_id if lesson.course else None,
+      course_id=lesson.course_id,
+      module_id=lesson.module_id,
+      topic_id=lesson.topic_id,
+      lesson_id=lesson.id,
+      duration_minutes=int(lesson.duration_minutes or 0),
+      occurred_at=activity_record.completed_at,
+    )
+  except Exception:
+    current_app.logger.exception("Learning activity recording failed after lesson completion.")
   return success_response(
     "Lesson marked complete.",
     {
@@ -349,8 +391,8 @@ def list_course_progress():
 
 
 def enroll_course(course_id):
-  course = Course.query.get(course_id)
-  if not course or course.is_published is False:
+  course = _accessible_course(course_id)
+  if not course:
     return error_response("Course not found.", 404)
 
   progress = LearningService.enroll_course(current_user.id, course_id)
