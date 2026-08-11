@@ -9,6 +9,7 @@ from app.models.course_model import (
   CourseBookmark,
   CourseCategory,
   CourseModule,
+  CourseTopic,
   CourseProgress,
   CourseReview,
   Lesson,
@@ -28,7 +29,11 @@ from app.models.xray_analysis_model import XrayAnalysis
 from app.models.xray_reference_model import XrayReferenceImage
 from app.models.reference_xray_library_model import ReferenceXrayLibrary
 from app.models.platform_setting_model import PlatformSetting
-from app.models.book_model import Book, Chapter
+from app.models.book_model import Book, Chapter, DocumentProcessingJob
+from app.models.rag_model import ChunkEmbedding, DocumentChunk
+from app.models.tutor_model import TutorMessage, TutorSession
+from app.models.adaptive_learning_model import LearningTopicMastery
+from app.models.learning_activity_model import LearningActivity
 from app.models.body_system_model import (
   BodySystem,
   BodySystemCourse,
@@ -51,6 +56,7 @@ __all__ = [
   "Course",
   "CourseCategory",
   "CourseModule",
+  "CourseTopic",
   "Lesson",
   "LessonBookmark",
   "LessonResource",
@@ -81,6 +87,13 @@ __all__ = [
   "PlatformSetting",
   "Book",
   "Chapter",
+  "DocumentProcessingJob",
+  "DocumentChunk",
+  "ChunkEmbedding",
+  "TutorSession",
+  "TutorMessage",
+  "LearningTopicMastery",
+  "LearningActivity",
   "BodySystem",
   "Organ",
   "HubDisease",
