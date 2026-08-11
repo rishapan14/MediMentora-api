@@ -4,6 +4,7 @@ from app.helpers.response import success_response
 from app.models.course_model import CompletedLesson, Lesson
 from app.models.quiz_model import Result
 from app.models.simulation_model import SimulationAttempt
+from app.services.learning_dashboard_service import LearningDashboardService
 from app.services.learning_service import LearningService
 
 
@@ -44,6 +45,11 @@ def dashboard():
       "weak_topics": progress.weak_topics or [],
     },
   })
+
+
+def learning_dashboard():
+  snapshot = LearningDashboardService.dashboard(current_user.id)
+  return success_response("Learning dashboard retrieved.", {"dashboard": snapshot})
 
 
 def achievements():
