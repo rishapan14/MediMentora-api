@@ -12,6 +12,7 @@ Full chapter/topic split belongs to Module 2 (Book Parser).
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -91,7 +92,7 @@ class DocumentExtractor:
   """Extract educational text and structure from uploaded medical documents."""
 
   @classmethod
-  def extract(cls, file_path: str, file_type: str) -> DocumentExtractionResult:
+  def extract(cls, file_path: str, file_type: str, progress_callback=None) -> DocumentExtractionResult:
     path = Path(file_path)
     if not path.is_file():
       return DocumentExtractionResult(
@@ -103,11 +104,17 @@ class DocumentExtractor:
     normalized = (file_type or "").strip().lower()
     try:
       if normalized == "pdf":
-        return cls._extract_pdf(str(path))
+        return cls._extract_pdf(str(path), progress_callback=progress_callback)
       if normalized == "docx":
-        return cls._extract_docx(str(path))
+        cls._report_progress(progress_callback, "extracting_content", 35)
+        result = cls._extract_docx(str(path))
+        cls._report_progress(progress_callback, "cleaning_content", 85)
+        return result
       if normalized == "txt":
-        return cls._extract_txt(str(path))
+        cls._report_progress(progress_callback, "extracting_content", 50)
+        result = cls._extract_txt(str(path))
+        cls._report_progress(progress_callback, "cleaning_content", 85)
+        return result
       return DocumentExtractionResult(
         success=False,
         message=f"Unsupported file type for extraction: {file_type}",
@@ -124,7 +131,7 @@ class DocumentExtractor:
   # --- PDF -----------------------------------------------------------------
 
   @classmethod
-  def _extract_pdf(cls, file_path: str) -> DocumentExtractionResult:
+  def _extract_pdf(cls, file_path: str, progress_callback=None) -> DocumentExtractionResult:
     try:
       import fitz
     except ImportError:
@@ -141,7 +148,9 @@ class DocumentExtractor:
     any_native = False
 
     try:
-      for idx in range(len(doc)):
+      total_pages = max(1, len(doc))
+      cls._report_progress(progress_callback, "extracting_content", 20)
+      for idx in range(total_pages):
         page_num = idx + 1
         page = doc.load_page(idx)
         headings, lists, tables_count, images_count = cls._pdf_page_structure(page)
@@ -167,6 +176,11 @@ class DocumentExtractor:
             )
           )
           confidences.append(0.95)
+          cls._report_progress(
+            progress_callback,
+            "extracting_content",
+            20 + round(((idx + 1) / total_pages) * 60),
+          )
           continue
 
         # Scanned / low-text page → OCR via existing medical OCR pipeline
@@ -191,9 +205,16 @@ class DocumentExtractor:
         )
         if confidence is not None:
           confidences.append(confidence)
+        cls._report_progress(
+          progress_callback,
+          "ocr_processing",
+          20 + round(((idx + 1) / total_pages) * 60),
+        )
     finally:
       doc.close()
 
+    cls._report_progress(progress_callback, "cleaning_content", 85)
+    cls._clean_repeated_page_noise(pages)
     merged = cls._merge_pages(pages)
     if not merged.strip():
       return DocumentExtractionResult(
@@ -441,10 +462,78 @@ class DocumentExtractor:
 
   @staticmethod
   def _normalize_whitespace(text: str) -> str:
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"(?<=\w)-\n(?=[a-z])", "", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{4,}", "\n\n\n", text)
     return text.strip()
+
+  @classmethod
+  def _clean_repeated_page_noise(cls, pages: list[PageStructure]) -> None:
+    """Remove repeated headers, footers, page numbers, and adjacent OCR duplicates."""
+    if not pages:
+      return
+
+    candidate_counts: dict[str, int] = {}
+    page_candidates: list[set[str]] = []
+    for page in pages:
+      lines = [line.strip() for line in (page.text or "").splitlines() if line.strip()]
+      keys = {
+        cls._noise_key(line)
+        for line in lines[:3] + lines[-3:]
+        if 1 <= len(line) <= 160
+        and cls._looks_like_running_noise(line)
+        and cls._noise_key(line)
+      }
+      page_candidates.append(keys)
+      for key in keys:
+        candidate_counts[key] = candidate_counts.get(key, 0) + 1
+
+    threshold = max(3, math.ceil(len(pages) * 0.5))
+    repeated = {key for key, count in candidate_counts.items() if count >= threshold}
+
+    for page, candidates in zip(pages, page_candidates):
+      cleaned_lines: list[str] = []
+      previous_key = ""
+      for raw_line in (page.text or "").splitlines():
+        line = raw_line.strip()
+        key = cls._noise_key(line)
+        is_page_number = bool(re.fullmatch(r"(?:page\s+)?\d+(?:\s+of\s+\d+)?", line, re.I))
+        if key and key in repeated and key in candidates:
+          continue
+        if is_page_number or (key and key == previous_key):
+          continue
+        cleaned_lines.append(raw_line.rstrip())
+        if key:
+          previous_key = key
+      page.text = cls._normalize_whitespace("\n".join(cleaned_lines))
+
+  @staticmethod
+  def _noise_key(value: str) -> str:
+    value = re.sub(r"\s+", " ", (value or "").strip().lower())
+    return value if any(char.isalpha() for char in value) else ""
+
+  @staticmethod
+  def _looks_like_running_noise(value: str) -> bool:
+    line = (value or "").strip()
+    lower = line.lower()
+    if not line:
+      return False
+    if any(marker in lower for marker in ("copyright", "©", "confidential", "www.", "http")):
+      return True
+    if line.endswith((".", "?", "!", ":", ";")):
+      return False
+    return len(line.split()) <= 14
+
+  @staticmethod
+  def _report_progress(callback, stage: str, percent: int) -> None:
+    if callback is None:
+      return
+    try:
+      callback(stage, max(0, min(100, int(percent))))
+    except Exception:
+      logger.debug("Document progress callback failed", exc_info=True)
 
   @classmethod
   def _detect_headings_from_text(cls, text: str) -> list[str]:
