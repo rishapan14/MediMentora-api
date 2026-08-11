@@ -61,6 +61,75 @@ python run.py
 python run_seeders.py
 ```
 
+### Learning-document background worker
+
+PDF/DOCX/TXT uploads under `/api/medical-teacher/books/upload-and-process` return
+HTTP `202` and a durable processing-job identifier. Run one worker alongside the
+web API:
+
+```bash
+python -m app.learning_worker
+```
+
+The Docker and Procfile startup path uses `start.sh`, which starts one document
+worker beside Gunicorn in the same container. This keeps local uploaded files
+available to both processes on a single Railway service. Mount
+`TEACHER_UPLOAD_FOLDER` (for example, `/data/medical-teacher`) on persistent
+storage in production, or set `UPLOAD_FOLDER` to a persistent uploads root.
+
+When `TEACHER_STORAGE_BACKEND=local`, use one container replica. Horizontal
+scaling requires a shared/object-storage adapter; the processing services are
+already isolated behind the document-storage interface for that extension.
+
+Processing status is available from:
+
+- `GET /api/medical-teacher/jobs`
+- `GET /api/medical-teacher/jobs/{job_id}`
+- `POST /api/medical-teacher/jobs/{job_id}/retry`
+
+### Grounded document structure (Learning Phase 3)
+
+The background document pipeline now detects explicit modules, chapters,
+topics, subtopics, learning objectives, definitions, examples, clinical
+concepts, and exam-relevant statements. Detected entries retain document and
+page provenance and are stored in the existing `books.structure_json` field.
+The detector does not create missing modules or chapters.
+
+- `GET /api/medical-teacher/books/{book_id}/structure`
+- `POST /api/medical-teacher/books/{book_id}/detect-structure`
+
+Detected structure remains separate from the persisted Phase 4 course outline described below.
+
+### Personal course generation (Learning Phase 4)
+
+After structure detection, the durable worker creates one private LMS course per
+owned source document. Existing `courses` and `course_modules` are reused;
+`course_topics` stores the missing topic/subtopic level. Generated records keep
+their source node and page provenance, remain private to the uploader, and are
+idempotently reused if the same document pipeline is run again.
+
+- `GET /api/medical-teacher/books/{book_id}/course`
+- `POST /api/medical-teacher/books/{book_id}/generate-course`
+
+Phase 4 creates the outline only. Lesson content generation begins in Phase 5.
+
+### Grounded lesson generation (Learning Phase 5)
+
+The durable pipeline now creates one cached lesson for every persisted topic or
+subtopic. Lessons reuse the existing `lessons` table and retain topic, document,
+page, source-hash, generation-method, and structured-content metadata.
+
+By default, lessons organize exact uploaded-document content deterministically.
+Set `TEACHER_LESSON_USE_AI=true` to allow optional AI explanations; AI output is
+accepted only when every supplied evidence quote exists verbatim in the source.
+Unsupported sections remain empty instead of being invented.
+
+- `GET /api/medical-teacher/books/{book_id}/lessons`
+- `POST /api/medical-teacher/books/{book_id}/generate-lessons`
+
+Lesson generation is idempotent and cached by topic and document content hash.
+Embeddings and semantic retrieval remain Phase 6 work.
+
 ### OCR for image reports (required for image upload → extract text)
 
 Image report extraction uses **pytesseract** (Python wrapper) plus the **Tesseract OCR system binary**.
