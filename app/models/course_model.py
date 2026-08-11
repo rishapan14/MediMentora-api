@@ -51,6 +51,22 @@ class Course(db.Model):
   duration_hours = db.Column(db.Float, default=0)
   instructor_name = db.Column(db.String(150), nullable=True)
   instructor_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+  owner_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+  source_book_id = db.Column(
+    db.Integer,
+    db.ForeignKey("books.id", ondelete="CASCADE"),
+    nullable=True,
+    unique=True,
+    index=True,
+  )
+  origin = db.Column(db.String(40), nullable=False, default="manual", index=True)
+  generation_status = db.Column(db.String(30), nullable=True, index=True)
+  lesson_generation_status = db.Column(db.String(30), nullable=True, index=True)
+  question_generation_status = db.Column(db.String(30), nullable=True, index=True)
+  quiz_generation_status = db.Column(db.String(30), nullable=True, index=True)
+  flashcard_generation_status = db.Column(db.String(30), nullable=True, index=True)
+  source_structure_version = db.Column(db.String(20), nullable=True)
+  source_json = db.Column(db.JSON, nullable=True)
   thumbnail_url = db.Column(db.String(500), nullable=True)
   banner_url = db.Column(db.String(500), nullable=True)
   learning_objectives = db.Column(db.JSON, nullable=True)  # list[str]
@@ -65,6 +81,8 @@ class Course(db.Model):
 
   category = db.relationship("CourseCategory", back_populates="courses")
   instructor = db.relationship("User", foreign_keys=[instructor_id])
+  owner = db.relationship("User", foreign_keys=[owner_user_id])
+  source_book = db.relationship("Book", back_populates="generated_course")
   modules = db.relationship(
     "CourseModule",
     back_populates="course",
@@ -73,6 +91,13 @@ class Course(db.Model):
     order_by="CourseModule.order_index",
   )
   lessons = db.relationship("Lesson", back_populates="course", lazy="dynamic", cascade="all, delete-orphan")
+  topics = db.relationship(
+    "CourseTopic",
+    back_populates="course",
+    lazy="dynamic",
+    cascade="all, delete-orphan",
+    order_by="CourseTopic.order_index",
+  )
   recommendations = db.relationship("Recommendation", back_populates="course", lazy="dynamic")
   certificates = db.relationship("Certificate", back_populates="course", lazy="dynamic")
   progress_records = db.relationship("CourseProgress", back_populates="course", lazy="dynamic", cascade="all, delete-orphan")
@@ -92,6 +117,15 @@ class Course(db.Model):
       "duration_hours": self.duration_hours,
       "instructor_name": self.instructor_name,
       "instructor_id": self.instructor_id,
+      "is_personal": self.owner_user_id is not None,
+      "origin": self.origin or "manual",
+      "source_book_id": self.source_book_id,
+      "generation_status": self.generation_status,
+      "lesson_generation_status": self.lesson_generation_status,
+      "question_generation_status": self.question_generation_status,
+      "quiz_generation_status": self.quiz_generation_status,
+      "flashcard_generation_status": self.flashcard_generation_status,
+      "source_structure_version": self.source_structure_version,
       "thumbnail_url": self.thumbnail_url,
       "banner_url": self.banner_url,
       "learning_objectives": self.learning_objectives or [],
@@ -120,12 +154,41 @@ class CourseModule(db.Model):
 
   id = db.Column(db.Integer, primary_key=True, autoincrement=True)
   course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+  parent_module_id = db.Column(
+    db.Integer,
+    db.ForeignKey("course_modules.id", ondelete="CASCADE"),
+    nullable=True,
+    index=True,
+  )
   title = db.Column(db.String(200), nullable=False)
   description = db.Column(db.Text, nullable=True)
   order_index = db.Column(db.Integer, default=0)
+  structure_type = db.Column(db.String(30), nullable=False, default="module")
+  source_node_id = db.Column(db.String(80), nullable=True)
+  page_start = db.Column(db.Integer, nullable=True)
+  page_end = db.Column(db.Integer, nullable=True)
+  source_json = db.Column(db.JSON, nullable=True)
   created_at = db.Column(db.DateTime, default=utc_now)
 
   course = db.relationship("Course", back_populates="modules")
+  parent = db.relationship(
+    "CourseModule",
+    remote_side=[id],
+    back_populates="children",
+    foreign_keys=[parent_module_id],
+  )
+  children = db.relationship(
+    "CourseModule",
+    back_populates="parent",
+    cascade="all, delete-orphan",
+    foreign_keys=[parent_module_id],
+  )
+  topics = db.relationship(
+    "CourseTopic",
+    back_populates="module",
+    lazy="dynamic",
+    foreign_keys="CourseTopic.module_id",
+  )
   lessons = db.relationship(
     "Lesson",
     back_populates="module",
@@ -133,18 +196,119 @@ class CourseModule(db.Model):
     foreign_keys="Lesson.module_id",
   )
 
+  __table_args__ = (
+    db.UniqueConstraint("course_id", "source_node_id", name="uq_course_module_source_node"),
+  )
+
   def to_dict(self, include_lessons=False):
     data = {
       "id": self.id,
       "course_id": self.course_id,
+      "parent_module_id": self.parent_module_id,
       "title": self.title,
       "description": self.description,
       "order_index": self.order_index,
+      "structure_type": self.structure_type or "module",
+      "source_node_id": self.source_node_id,
+      "page_start": self.page_start,
+      "page_end": self.page_end,
+      "source": self.source_json,
       "lesson_count": self.lessons.count(),
+      "topic_count": self.topics.count(),
       "created_at": self.created_at.isoformat() if self.created_at else None,
     }
     if include_lessons:
       data["lessons"] = [l.to_dict() for l in self.lessons.order_by(Lesson.order_index)]
+    return data
+
+
+class CourseTopic(db.Model):
+  """A source-grounded topic or subtopic detected from uploaded material."""
+
+  __tablename__ = "course_topics"
+
+  id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+  course_id = db.Column(
+    db.Integer,
+    db.ForeignKey("courses.id", ondelete="CASCADE"),
+    nullable=False,
+    index=True,
+  )
+  module_id = db.Column(
+    db.Integer,
+    db.ForeignKey("course_modules.id", ondelete="CASCADE"),
+    nullable=True,
+    index=True,
+  )
+  parent_topic_id = db.Column(
+    db.Integer,
+    db.ForeignKey("course_topics.id", ondelete="CASCADE"),
+    nullable=True,
+    index=True,
+  )
+  title = db.Column(db.String(200), nullable=False)
+  description = db.Column(db.Text, nullable=True)
+  order_index = db.Column(db.Integer, nullable=False, default=0)
+  structure_type = db.Column(db.String(30), nullable=False, default="topic")
+  source_node_id = db.Column(db.String(80), nullable=True)
+  page_start = db.Column(db.Integer, nullable=True)
+  page_end = db.Column(db.Integer, nullable=True)
+  source_json = db.Column(db.JSON, nullable=True)
+  learning_objectives = db.Column(db.JSON, nullable=True)
+  important_concepts = db.Column(db.JSON, nullable=True)
+  created_at = db.Column(db.DateTime, default=utc_now)
+  updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
+
+  course = db.relationship("Course", back_populates="topics")
+  module = db.relationship("CourseModule", back_populates="topics", foreign_keys=[module_id])
+  parent = db.relationship(
+    "CourseTopic",
+    remote_side=[id],
+    back_populates="children",
+    foreign_keys=[parent_topic_id],
+  )
+  children = db.relationship(
+    "CourseTopic",
+    back_populates="parent",
+    cascade="all, delete-orphan",
+    foreign_keys=[parent_topic_id],
+  )
+  lesson = db.relationship(
+    "Lesson",
+    back_populates="topic",
+    uselist=False,
+    foreign_keys="Lesson.topic_id",
+  )
+
+  __table_args__ = (
+    db.UniqueConstraint("course_id", "source_node_id", name="uq_course_topic_source_node"),
+  )
+
+  def to_dict(self, include_children: bool = False):
+    data = {
+      "id": self.id,
+      "course_id": self.course_id,
+      "module_id": self.module_id,
+      "parent_topic_id": self.parent_topic_id,
+      "title": self.title,
+      "description": self.description,
+      "order_index": self.order_index,
+      "structure_type": self.structure_type or "topic",
+      "source_node_id": self.source_node_id,
+      "page_start": self.page_start,
+      "page_end": self.page_end,
+      "source": self.source_json,
+      "learning_objectives": self.learning_objectives or [],
+      "important_concepts": self.important_concepts or [],
+      "lesson_id": self.lesson.id if self.lesson else None,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+    if include_children:
+      data["children"] = [
+        child.to_dict(include_children=True)
+        for child in sorted(self.children, key=lambda item: (item.order_index, item.id or 0))
+      ]
     return data
 
 
@@ -156,18 +320,33 @@ class Lesson(db.Model):
   id = db.Column(db.Integer, primary_key=True, autoincrement=True)
   course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
   module_id = db.Column(db.Integer, db.ForeignKey("course_modules.id"), nullable=True, index=True)
+  topic_id = db.Column(
+    db.Integer,
+    db.ForeignKey("course_topics.id", ondelete="CASCADE"),
+    nullable=True,
+    unique=True,
+    index=True,
+  )
   title = db.Column(db.String(200), nullable=False)
   content = db.Column(db.Text, nullable=True)
   summary = db.Column(db.Text, nullable=True)
   order_index = db.Column(db.Integer, default=0)
   duration_minutes = db.Column(db.Integer, default=15)
   topic_tags = db.Column(db.JSON, nullable=True)
+  content_json = db.Column(db.JSON, nullable=True)
+  source_json = db.Column(db.JSON, nullable=True)
+  source_hash = db.Column(db.String(64), nullable=True, index=True)
+  origin = db.Column(db.String(40), nullable=False, default="manual", index=True)
+  generation_method = db.Column(db.String(40), nullable=True)
+  difficulty_level = db.Column(db.String(20), nullable=True)
+  generated_at = db.Column(db.DateTime, nullable=True)
   is_published = db.Column(db.Boolean, default=True)
   created_at = db.Column(db.DateTime, default=utc_now)
   updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
 
   course = db.relationship("Course", back_populates="lessons")
   module = db.relationship("CourseModule", back_populates="lessons")
+  topic = db.relationship("CourseTopic", back_populates="lesson", foreign_keys=[topic_id])
   bookmarks = db.relationship("LessonBookmark", back_populates="lesson", lazy="dynamic", cascade="all, delete-orphan")
   completions = db.relationship("CompletedLesson", back_populates="lesson", lazy="dynamic", cascade="all, delete-orphan")
   resources = db.relationship("LessonResource", back_populates="lesson", lazy="dynamic", cascade="all, delete-orphan")
@@ -179,12 +358,19 @@ class Lesson(db.Model):
       "id": self.id,
       "course_id": self.course_id,
       "module_id": self.module_id,
+      "topic_id": self.topic_id,
       "title": self.title,
       "content": self.content,
       "summary": self.summary,
       "order_index": self.order_index,
       "duration_minutes": self.duration_minutes,
       "topic_tags": self.topic_tags,
+      "content_json": self.content_json,
+      "source": self.source_json,
+      "origin": self.origin or "manual",
+      "generation_method": self.generation_method,
+      "difficulty_level": self.difficulty_level,
+      "generated_at": self.generated_at.isoformat() if self.generated_at else None,
       "is_published": self.is_published if self.is_published is not None else True,
       "created_at": self.created_at.isoformat() if self.created_at else None,
       "updated_at": self.updated_at.isoformat() if self.updated_at else None,
