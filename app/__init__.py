@@ -90,6 +90,7 @@ def create_app():
     XrayAnalysis,
     Book,
     Chapter,
+    DocumentProcessingJob,
     PlatformSetting,
     BodySystem,
     Organ,
