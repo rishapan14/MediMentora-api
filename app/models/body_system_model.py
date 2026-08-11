@@ -496,9 +496,30 @@ class HubFlashcard(db.Model):
   lesson_id = db.Column(
     db.Integer, db.ForeignKey("lessons.id", ondelete="SET NULL"), nullable=True, index=True
   )
+  owner_user_id = db.Column(
+    db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+  )
+  book_id = db.Column(
+    db.Integer, db.ForeignKey("books.id", ondelete="CASCADE"), nullable=True, index=True
+  )
+  course_id = db.Column(
+    db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=True, index=True
+  )
+  module_id = db.Column(
+    db.Integer, db.ForeignKey("course_modules.id", ondelete="SET NULL"), nullable=True, index=True
+  )
+  topic_id = db.Column(
+    db.Integer, db.ForeignKey("course_topics.id", ondelete="SET NULL"), nullable=True, index=True
+  )
   front_text = db.Column(db.Text, nullable=False)
   back_text = db.Column(db.Text, nullable=False)
   card_level = db.Column(db.String(40), default="basic")  # basic|advanced|exam_revision
+  source_json = db.Column(db.JSON, nullable=True)
+  source_hash = db.Column(db.String(64), nullable=True, index=True)
+  generation_hash = db.Column(db.String(64), nullable=True, index=True)
+  origin = db.Column(db.String(40), nullable=True, index=True)
+  generation_method = db.Column(db.String(40), nullable=True)
+  generated_at = db.Column(db.DateTime, nullable=True)
   topic_tags = db.Column(db.JSON, nullable=True)
   is_published = db.Column(db.Boolean, default=True, index=True)
   created_by = db.Column(
@@ -514,10 +535,18 @@ class HubFlashcard(db.Model):
       "organ_id": self.organ_id,
       "disease_id": self.disease_id,
       "lesson_id": self.lesson_id,
+      "book_id": self.book_id,
+      "course_id": self.course_id,
+      "module_id": self.module_id,
+      "topic_id": self.topic_id,
       "front_text": self.front_text,
       "back_text": self.back_text,
       "card_level": self.card_level or "basic",
       "topic_tags": self.topic_tags or [],
+      "source": self.source_json,
+      "origin": self.origin,
+      "generation_method": self.generation_method,
+      "generated_at": self.generated_at.isoformat() if self.generated_at else None,
       "is_published": bool(self.is_published),
       "created_by": self.created_by,
       "safety": {"educational_only": True, "not_a_diagnosis": True},
@@ -543,6 +572,11 @@ class HubFlashcardFavorite(db.Model):
   ease_factor = db.Column(db.Float, default=2.5)
   interval_days = db.Column(db.Integer, default=0)
   repetitions = db.Column(db.Integer, default=0)
+  status = db.Column(db.String(30), default="learning", index=True)
+  correct_count = db.Column(db.Integer, default=0)
+  incorrect_count = db.Column(db.Integer, default=0)
+  review_count = db.Column(db.Integer, default=0)
+  last_rating = db.Column(db.String(30), nullable=True)
   next_review_at = db.Column(db.DateTime, nullable=True, index=True)
   last_reviewed_at = db.Column(db.DateTime, nullable=True)
   created_at = db.Column(db.DateTime, default=utc_now)
@@ -557,13 +591,18 @@ class HubFlashcardFavorite(db.Model):
       "ease_factor": float(self.ease_factor) if self.ease_factor is not None else 2.5,
       "interval_days": int(self.interval_days or 0),
       "repetitions": int(self.repetitions or 0),
+      "status": self.status or "learning",
+      "correct_count": int(self.correct_count or 0),
+      "incorrect_count": int(self.incorrect_count or 0),
+      "review_count": int(self.review_count or 0),
+      "last_rating": self.last_rating,
       "next_review_at": self.next_review_at.isoformat() if self.next_review_at else None,
       "last_reviewed_at": self.last_reviewed_at.isoformat() if self.last_reviewed_at else None,
       "created_at": self.created_at.isoformat() if self.created_at else None,
       "spaced_repetition": {
-        "available": False,
+        "available": True,
         "future_ready": True,
-        "note": "Spaced repetition scheduling arrives in a later phase.",
+        "note": "Review scheduling uses stored ease, repetition, interval, and due-date fields.",
       },
     }
     if include_card and self.flashcard:
