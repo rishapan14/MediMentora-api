@@ -71,11 +71,37 @@ class Config:
     )
     XRAY_AUTO_SEED_REFERENCES = os.getenv("XRAY_AUTO_SEED_REFERENCES", "false").lower() == "true"
     # AI Medical Teacher — textbooks / notes / guidelines (Module 1)
-    TEACHER_UPLOAD_FOLDER = os.path.join(UPLOAD_FOLDER, "medical_teacher", "books")
+    TEACHER_UPLOAD_FOLDER = os.getenv(
+      "TEACHER_UPLOAD_FOLDER",
+      os.path.join(UPLOAD_FOLDER, "medical_teacher", "books"),
+    )
     TEACHER_MAX_FILES = int(os.getenv("TEACHER_MAX_FILES", "5"))
     TEACHER_MAX_FILE_BYTES = int(os.getenv("TEACHER_MAX_FILE_BYTES", str(100 * 1024 * 1024)))  # 100 MB
     TEACHER_MAX_TOTAL_BYTES = int(os.getenv("TEACHER_MAX_TOTAL_BYTES", str(200 * 1024 * 1024)))
     TEACHER_ALLOWED_EXTENSIONS = ("pdf", "docx", "txt")
+    TEACHER_STORAGE_BACKEND = os.getenv("TEACHER_STORAGE_BACKEND", "local").strip().lower()
+    TEACHER_JOB_POLL_SECONDS = float(os.getenv("TEACHER_JOB_POLL_SECONDS", "2"))
+    TEACHER_JOB_LEASE_SECONDS = int(os.getenv("TEACHER_JOB_LEASE_SECONDS", "1800"))
+    TEACHER_JOB_MAX_ATTEMPTS = int(os.getenv("TEACHER_JOB_MAX_ATTEMPTS", "3"))
+    TEACHER_LESSON_USE_AI = os.getenv("TEACHER_LESSON_USE_AI", "false").lower() == "true"
+    TEACHER_LESSON_MAX_SOURCE_CHARS = int(os.getenv("TEACHER_LESSON_MAX_SOURCE_CHARS", "12000"))
+    TEACHER_EMBEDDING_PROVIDER = os.getenv("TEACHER_EMBEDDING_PROVIDER", "local_hash").strip().lower()
+    TEACHER_EMBEDDING_MODEL = os.getenv("TEACHER_EMBEDDING_MODEL", "medimentora-hash-v1").strip()
+    TEACHER_EMBEDDING_DIMENSION = int(os.getenv("TEACHER_EMBEDDING_DIMENSION", "256"))
+    TEACHER_OPENAI_EMBEDDING_MODEL = os.getenv("TEACHER_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small").strip()
+    TEACHER_CHUNK_SIZE_CHARS = int(os.getenv("TEACHER_CHUNK_SIZE_CHARS", "1800"))
+    TEACHER_CHUNK_OVERLAP_CHARS = int(os.getenv("TEACHER_CHUNK_OVERLAP_CHARS", "250"))
+    TEACHER_TUTOR_USE_AI = os.getenv("TEACHER_TUTOR_USE_AI", "true").lower() == "true"
+    TEACHER_TUTOR_CONTEXT_CHUNKS = int(os.getenv("TEACHER_TUTOR_CONTEXT_CHUNKS", "5"))
+    TEACHER_TUTOR_HISTORY_MESSAGES = int(os.getenv("TEACHER_TUTOR_HISTORY_MESSAGES", "8"))
+    TEACHER_TUTOR_MAX_MESSAGE_CHARS = int(os.getenv("TEACHER_TUTOR_MAX_MESSAGE_CHARS", "2000"))
+    TEACHER_TUTOR_MAX_SESSION_MESSAGES = int(os.getenv("TEACHER_TUTOR_MAX_SESSION_MESSAGES", "100"))
+    TEACHER_QUESTION_USE_AI = os.getenv("TEACHER_QUESTION_USE_AI", "false").lower() == "true"
+    TEACHER_QUESTIONS_PER_TOPIC = int(os.getenv("TEACHER_QUESTIONS_PER_TOPIC", "5"))
+    TEACHER_QUESTION_MAX_SOURCE_CHARS = int(os.getenv("TEACHER_QUESTION_MAX_SOURCE_CHARS", "8000"))
+    TEACHER_DEFAULT_QUIZ_QUESTION_COUNT = int(os.getenv("TEACHER_DEFAULT_QUIZ_QUESTION_COUNT", "10"))
+    TEACHER_QUIZ_MINUTES_PER_QUESTION = float(os.getenv("TEACHER_QUIZ_MINUTES_PER_QUESTION", "1.5"))
+    TEACHER_FLASHCARD_STYLES = os.getenv("TEACHER_FLASHCARD_STYLES", "easy,medium,hard,exam,nursing,clinical")
     # X-ray upload limits
     XRAY_MAX_FILES = int(os.getenv("XRAY_MAX_FILES", "20"))
     XRAY_MAX_FILE_BYTES = int(os.getenv("XRAY_MAX_FILE_BYTES", str(25 * 1024 * 1024)))  # 25 MB each
