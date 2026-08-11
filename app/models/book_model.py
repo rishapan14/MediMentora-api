@@ -6,6 +6,8 @@ Module 2: chapters + content analysis (Book Parser)
 
 from __future__ import annotations
 
+import uuid
+
 from app.extensions import db
 from app.utils import utc_now
 
@@ -34,6 +36,8 @@ class Book(db.Model):
   original_filename = db.Column(db.String(255), nullable=False)
   stored_filename = db.Column(db.String(255), nullable=False)
   file_path = db.Column(db.String(500), nullable=False)
+  storage_backend = db.Column(db.String(40), nullable=False, default="local")
+  storage_key = db.Column(db.String(500), nullable=True, index=True)
   file_type = db.Column(db.String(20), nullable=False)  # pdf | docx | txt
   mime_type = db.Column(db.String(100), nullable=True)
   file_size = db.Column(db.Integer, nullable=True)
@@ -48,6 +52,12 @@ class Book(db.Model):
   ocr_confidence = db.Column(db.Float, nullable=True)
   structure_json = db.Column(db.JSON, nullable=True)
   error_message = db.Column(db.Text, nullable=True)
+  rag_status = db.Column(db.String(30), nullable=True, index=True)
+  rag_provider = db.Column(db.String(40), nullable=True)
+  rag_model = db.Column(db.String(120), nullable=True)
+  rag_chunk_count = db.Column(db.Integer, nullable=True)
+  rag_indexed_at = db.Column(db.DateTime, nullable=True)
+  rag_error = db.Column(db.String(500), nullable=True)
 
   # Module 2 — Book Parser
   analysis_json = db.Column(db.JSON, nullable=True)
@@ -66,6 +76,43 @@ class Book(db.Model):
     cascade="all, delete-orphan",
     order_by="Chapter.order_index",
   )
+  processing_jobs = db.relationship(
+    "DocumentProcessingJob",
+    back_populates="book",
+    lazy="dynamic",
+    cascade="all, delete-orphan",
+  )
+  generated_course = db.relationship(
+    "Course",
+    back_populates="source_book",
+    uselist=False,
+    cascade="all, delete-orphan",
+    single_parent=True,
+  )
+  document_chunks = db.relationship(
+    "DocumentChunk",
+    back_populates="book",
+    lazy="dynamic",
+    cascade="all, delete-orphan",
+  )
+  tutor_sessions = db.relationship(
+    "TutorSession",
+    back_populates="book",
+    lazy="dynamic",
+    cascade="all, delete-orphan",
+  )
+  question_banks = db.relationship(
+    "Quiz",
+    back_populates="source_book",
+    lazy="dynamic",
+    cascade="all, delete-orphan",
+    foreign_keys="Quiz.source_book_id",
+  )
+  learning_flashcards = db.relationship(
+    "HubFlashcard",
+    foreign_keys="HubFlashcard.book_id",
+    cascade="all, delete-orphan",
+  )
 
   def to_dict(
     self,
@@ -83,7 +130,7 @@ class Book(db.Model):
       "description": self.description,
       "original_filename": self.original_filename,
       "stored_filename": self.stored_filename,
-      "file_path": self.file_path,
+      "storage_backend": self.storage_backend or "local",
       "file_type": self.file_type,
       "mime_type": self.mime_type,
       "file_size": self.file_size,
@@ -94,6 +141,12 @@ class Book(db.Model):
       "char_count": self.char_count,
       "word_count": self.word_count,
       "ocr_confidence": self.ocr_confidence,
+      "rag_status": self.rag_status,
+      "rag_provider": self.rag_provider,
+      "rag_model": self.rag_model,
+      "rag_chunk_count": int(self.rag_chunk_count or 0),
+      "rag_indexed_at": self.rag_indexed_at.isoformat() if self.rag_indexed_at else None,
+      "rag_error": self.rag_error,
       "parse_method": self.parse_method,
       "chapter_count": self.chapter_count if self.chapter_count is not None else self.chapters.count(),
       "parsed_at": self.parsed_at.isoformat() if self.parsed_at else None,
@@ -110,6 +163,72 @@ class Book(db.Model):
       data["analysis_json"] = self.analysis_json
     if include_chapters:
       data["chapters"] = [c.to_dict() for c in self.chapters.order_by(Chapter.order_index)]
+    return data
+
+
+class DocumentProcessingJob(db.Model):
+  """Durable background work for uploaded learning documents."""
+
+  __tablename__ = "document_processing_jobs"
+
+  id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+  public_id = db.Column(
+    db.String(36),
+    nullable=False,
+    unique=True,
+    index=True,
+    default=lambda: str(uuid.uuid4()),
+  )
+  user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+  book_id = db.Column(
+    db.Integer,
+    db.ForeignKey("books.id", ondelete="CASCADE"),
+    nullable=False,
+    index=True,
+  )
+  job_type = db.Column(db.String(40), nullable=False, default="extract")
+  status = db.Column(db.String(30), nullable=False, default="queued", index=True)
+  stage = db.Column(db.String(60), nullable=False, default="queued")
+  progress_percent = db.Column(db.Integer, nullable=False, default=0)
+  attempts = db.Column(db.Integer, nullable=False, default=0)
+  max_attempts = db.Column(db.Integer, nullable=False, default=3)
+  lease_token = db.Column(db.String(64), nullable=True, index=True)
+  lease_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+  error_code = db.Column(db.String(80), nullable=True)
+  error_message = db.Column(db.String(500), nullable=True)
+  result_json = db.Column(db.JSON, nullable=True)
+  started_at = db.Column(db.DateTime, nullable=True)
+  completed_at = db.Column(db.DateTime, nullable=True)
+  created_at = db.Column(db.DateTime, default=utc_now, index=True)
+  updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
+
+  book = db.relationship("Book", back_populates="processing_jobs")
+  user = db.relationship("User")
+
+  __table_args__ = (
+    db.Index("ix_document_jobs_claim", "status", "lease_expires_at", "created_at"),
+  )
+
+  def to_dict(self, include_book: bool = True):
+    data = {
+      "id": self.public_id,
+      "book_id": self.book_id,
+      "job_type": self.job_type,
+      "status": self.status,
+      "stage": self.stage,
+      "progress_percent": max(0, min(100, int(self.progress_percent or 0))),
+      "attempts": int(self.attempts or 0),
+      "max_attempts": int(self.max_attempts or 0),
+      "error_code": self.error_code,
+      "error_message": self.error_message,
+      "result": self.result_json or None,
+      "started_at": self.started_at.isoformat() if self.started_at else None,
+      "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+    if include_book and self.book:
+      data["book"] = self.book.to_dict()
     return data
 
 
