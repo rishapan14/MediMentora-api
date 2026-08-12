@@ -1,6 +1,6 @@
 import os
 from datetime import timedelta
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -10,6 +10,28 @@ load_dotenv()
 def _csv_env(name: str, default: str) -> tuple[str, ...]:
     """Read a comma-separated environment variable into clean values."""
     return tuple(value.strip().rstrip("/") for value in os.getenv(name, default).split(",") if value.strip())
+
+
+def _database_settings() -> dict[str, str]:
+    """Resolve explicit settings or Railway/MySQL connection URLs."""
+    database_url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("MYSQL_URL")
+        or os.getenv("MYSQL_PUBLIC_URL")
+        or ""
+    ).strip()
+    parsed = urlparse(database_url) if database_url else None
+
+    return {
+        "user": os.getenv("DB_USER") or os.getenv("MYSQLUSER") or (unquote(parsed.username) if parsed and parsed.username else "root"),
+        "password": os.getenv("DB_PASSWORD") or os.getenv("MYSQLPASSWORD") or (unquote(parsed.password) if parsed and parsed.password else "root123"),
+        "host": os.getenv("DB_HOST") or os.getenv("MYSQLHOST") or (parsed.hostname if parsed else None) or "localhost",
+        "port": os.getenv("DB_PORT") or os.getenv("MYSQLPORT") or (str(parsed.port) if parsed and parsed.port else "3306"),
+        "name": os.getenv("DB_NAME") or os.getenv("MYSQLDATABASE") or (unquote(parsed.path.lstrip("/")) if parsed and parsed.path else "clinical_platform_db"),
+    }
+
+
+_DB = _database_settings()
 
 
 class Config:
@@ -27,11 +49,11 @@ class Config:
     # MySQL database
     # Support both this application's DB_* names and Railway MySQL's native
     # MYSQL* variables. Explicit DB_* values take precedence.
-    DB_USER = os.getenv("DB_USER") or os.getenv("MYSQLUSER", "root")
-    DB_PASSWORD = os.getenv("DB_PASSWORD") or os.getenv("MYSQLPASSWORD", "root123")
-    DB_HOST = os.getenv("DB_HOST") or os.getenv("MYSQLHOST", "localhost")
-    DB_PORT = os.getenv("DB_PORT") or os.getenv("MYSQLPORT", "3306")
-    DB_NAME = os.getenv("DB_NAME") or os.getenv("MYSQLDATABASE", "clinical_platform_db")
+    DB_USER = _DB["user"]
+    DB_PASSWORD = _DB["password"]
+    DB_HOST = _DB["host"]
+    DB_PORT = _DB["port"]
+    DB_NAME = _DB["name"]
 
     SQLALCHEMY_DATABASE_URI = (
         f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}"

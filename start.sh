@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-# Railway must be able to reach /health even while MySQL is starting or schema
-# patches are still running. Keep bootstrap off the critical path of the web
-# listener; API requests remain protected by the application's schema guard.
+# Do not start the web process until the schema exists. Running this in the
+# background hides connection/DDL failures because Railway's /health check can
+# pass while the database is unusable.
 if [ "${RUN_SCHEMA_BOOTSTRAP:-true}" = "true" ]; then
-  python -m app.schema_bootstrap &
+  python -m app.schema_bootstrap
 fi
 
 # Run document processing in a separate Railway worker service in production.

@@ -71,6 +71,18 @@ web API:
 python -m app.learning_worker
 ```
 
+### Railway MySQL schema bootstrap
+
+Link the API service to the Railway MySQL service and add this API variable:
+
+```text
+DATABASE_URL=${{MySQL.MYSQL_URL}}
+```
+
+If the database service has a different Railway service name, replace `MySQL`
+with that name. The web container now waits for MySQL, creates/patches all tables,
+and only then starts Gunicorn. A failed schema bootstrap fails the deployment
+instead of leaving a healthy-looking API with missing tables.
 The Docker and Procfile startup path uses `start.sh`, which starts one document
 worker beside Gunicorn in the same container. This keeps local uploaded files
 available to both processes on a single Railway service. Mount
