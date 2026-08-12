@@ -13,7 +13,16 @@ def _csv_env(name: str, default: str) -> tuple[str, ...]:
 
 
 def _database_settings() -> dict[str, str]:
-    """Resolve Railway/MySQL connection URLs before legacy field settings."""
+    """Resolve one complete database configuration without mixing sources."""
+    explicit = {
+        "user": os.getenv("DB_USER", "").strip(),
+        "password": os.getenv("DB_PASSWORD", ""),
+        "host": os.getenv("DB_HOST", "").strip(),
+        "port": os.getenv("DB_PORT", "").strip(),
+        "name": os.getenv("DB_NAME", "").strip(),
+    }
+    if all(explicit.values()):
+        return explicit
     database_url = (
         os.getenv("DATABASE_URL")
         or os.getenv("MYSQL_URL")
@@ -57,7 +66,7 @@ class Config:
 
     # MySQL database
     # Support both this application's DB_* names and Railway MySQL's native
-    # MYSQL* variables. Railway connection values take precedence over legacy DB_*.
+    # Use either a complete DB_* bundle, a connection URL, or Railway MYSQL*.
     DB_USER = _DB["user"]
     DB_PASSWORD = _DB["password"]
     DB_HOST = _DB["host"]

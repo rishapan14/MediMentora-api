@@ -18,10 +18,29 @@ def test_database_url_populates_mysql_settings(monkeypatch):
   }
 
 
-def test_connection_url_overrides_stale_explicit_database_settings(monkeypatch):
+def test_complete_explicit_database_settings_override_connection_url(monkeypatch):
   monkeypatch.setenv("DATABASE_URL", "mysql://url-user:url-pass@url-host:3306/url-db")
+  monkeypatch.setenv("DB_USER", "explicit-user")
+  monkeypatch.setenv("DB_PASSWORD", "explicit-pass")
   monkeypatch.setenv("DB_HOST", "private-mysql")
+  monkeypatch.setenv("DB_PORT", "3307")
   monkeypatch.setenv("DB_NAME", "app_db")
+
+  settings = _database_settings()
+
+  assert settings == {
+    "user": "explicit-user",
+    "password": "explicit-pass",
+    "host": "private-mysql",
+    "port": "3307",
+    "name": "app_db",
+  }
+
+
+def test_connection_url_wins_over_incomplete_legacy_settings(monkeypatch):
+  monkeypatch.setenv("DATABASE_URL", "mysql://url-user:url-pass@url-host:3306/url-db")
+  monkeypatch.setenv("DB_NAME", "stale-db")
+  monkeypatch.delenv("DB_HOST", raising=False)
 
   settings = _database_settings()
 
@@ -54,16 +73,25 @@ def test_database_bootstrap_connects_to_provisioned_database(monkeypatch):
   assert calls[0]["host"] == "mysql.internal"
   assert calls[1] == "closed"
 
-def test_railway_mysql_variables_override_legacy_db_values(monkeypatch):
-  monkeypatch.delenv("DATABASE_URL", raising=False)
-  monkeypatch.delenv("MYSQL_URL", raising=False)
-  monkeypatch.delenv("MYSQL_PUBLIC_URL", raising=False)
-  monkeypatch.setenv("DB_NAME", "clinical_platform_db")
-  monkeypatch.setenv("MYSQLDATABASE", "railway")
-  monkeypatch.setenv("DB_HOST", "old-host")
+def test_complete_railway_mysql_bundle_used_when_explicit_bundle_is_incomplete(monkeypatch):
+  for name in (
+    "DATABASE_URL", "MYSQL_URL", "MYSQL_PUBLIC_URL",
+    "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT",
+  ):
+    monkeypatch.delenv(name, raising=False)
+  monkeypatch.setenv("DB_NAME", "stale-db")
+  monkeypatch.setenv("MYSQLUSER", "railway-user")
+  monkeypatch.setenv("MYSQLPASSWORD", "railway-pass")
   monkeypatch.setenv("MYSQLHOST", "mysql.railway.internal")
+  monkeypatch.setenv("MYSQLPORT", "3306")
+  monkeypatch.setenv("MYSQLDATABASE", "railway")
 
   settings = _database_settings()
 
-  assert settings["name"] == "railway"
-  assert settings["host"] == "mysql.railway.internal"
+  assert settings == {
+    "user": "railway-user",
+    "password": "railway-pass",
+    "host": "mysql.railway.internal",
+    "port": "3306",
+    "name": "railway",
+  }

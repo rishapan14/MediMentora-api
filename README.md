@@ -80,9 +80,9 @@ DATABASE_URL=${{MySQL.MYSQL_URL}}
 ```
 
 If the database service has a different Railway service name, replace `MySQL`
-with that name. Remove old `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and
-`DB_NAME` variables from the API service so they cannot point at another schema.
-The web container now waits for MySQL, creates/patches all tables,
+with that name. Alternatively configure all five `DB_*` reference variables;
+the application never mixes a partial `DB_*` configuration with a URL. The web
+container waits for MySQL, creates/patches all tables,
 and only then starts Gunicorn. A failed schema bootstrap fails the deployment
 instead of leaving a healthy-looking API with missing tables.
 The Docker and Procfile startup path uses `start.sh`, which starts one document
