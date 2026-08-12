@@ -13,9 +13,11 @@ else
   unset SCHEMA_READY_FILE
 fi
 
-# Run document processing in a separate Railway worker service in production.
+# Document processing must run in a separate Railway worker service. Starting
+# it beside OCR/OpenCV and Gunicorn can exhaust a small web container and leave
+# the public domain returning Railway 502 responses.
 if [ "${RUN_LEARNING_WORKER:-false}" = "true" ]; then
-  python -m app.learning_worker &
+  echo "WARNING: RUN_LEARNING_WORKER is ignored by the web service; deploy app.learning_worker separately" >&2
 fi
 
 exec gunicorn \

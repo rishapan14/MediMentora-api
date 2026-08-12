@@ -50,6 +50,7 @@ def test_railway_web_start_is_health_first_and_memory_bounded():
   assert "python -m app.schema_bootstrap" not in start_script
   assert "RUN_SCHEMA_BOOTSTRAP_BACKGROUND=true" in start_script
   assert "SCHEMA_READY_FILE=/tmp/medimentora-schema-ready" in start_script
+  assert "python -m app.learning_worker" not in start_script
   assert '${RUN_LEARNING_WORKER:-false}' in start_script
   assert '${MEDIMENTORA_WEB_WORKERS:-1}' in start_script
   assert '--worker-class gthread' in start_script
