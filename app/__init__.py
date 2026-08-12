@@ -5,7 +5,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 
 from app.config import Config
 from app.extensions import db, jwt
@@ -261,7 +262,7 @@ def create_app():
 
   @app.route("/ready", methods=["GET"])
   def readiness_check():
-    """Report whether schema bootstrap completed without blocking liveness."""
+    """Verify schema bootstrap, live MySQL connectivity, and table presence."""
     ready_file = os.getenv("SCHEMA_READY_FILE", "").strip()
     if ready_file and not os.path.isfile(ready_file):
       return jsonify({
@@ -269,10 +270,27 @@ def create_app():
         "service": "medimentora-api",
         "database_schema": "initializing",
       }), 503
+    try:
+      with db.engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+      table_count = len(inspect(db.engine).get_table_names())
+    except SQLAlchemyError:
+      return jsonify({
+        "status": "error",
+        "service": "medimentora-api",
+        "database_schema": "unreachable",
+      }), 503
+    if table_count == 0:
+      return jsonify({
+        "status": "starting",
+        "service": "medimentora-api",
+        "database_schema": "empty",
+      }), 503
     return jsonify({
       "status": "ok",
       "service": "medimentora-api",
       "database_schema": "ready",
+      "table_count": table_count,
     }), 200
 
   @app.errorhandler(400)

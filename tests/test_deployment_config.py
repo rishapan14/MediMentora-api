@@ -56,6 +56,7 @@ def test_railway_web_start_is_health_first_and_memory_bounded():
   assert '${MEDIMENTORA_WEB_THREADS:-2}' in start_script
   assert start_script.index("RUN_SCHEMA_BOOTSTRAP_BACKGROUND=true") < start_script.index("exec gunicorn")
   assert railway["build"]["builder"] == "DOCKERFILE"
+  assert railway["deploy"]["startCommand"] == "sh start.sh"
   assert railway["deploy"]["healthcheckPath"] == "/health"
   assert railway["deploy"]["restartPolicyType"] == "ON_FAILURE"
 
