@@ -13,7 +13,7 @@ def _csv_env(name: str, default: str) -> tuple[str, ...]:
 
 
 def _database_settings() -> dict[str, str]:
-    """Resolve explicit settings or Railway/MySQL connection URLs."""
+    """Resolve Railway/MySQL connection URLs before legacy field settings."""
     database_url = (
         os.getenv("DATABASE_URL")
         or os.getenv("MYSQL_URL")
@@ -22,12 +22,21 @@ def _database_settings() -> dict[str, str]:
     ).strip()
     parsed = urlparse(database_url) if database_url else None
 
+    if parsed and parsed.hostname and parsed.path.lstrip("/"):
+        return {
+            "user": unquote(parsed.username or "root"),
+            "password": unquote(parsed.password or ""),
+            "host": parsed.hostname,
+            "port": str(parsed.port or 3306),
+            "name": unquote(parsed.path.lstrip("/")),
+        }
+
     return {
-        "user": os.getenv("DB_USER") or os.getenv("MYSQLUSER") or (unquote(parsed.username) if parsed and parsed.username else "root"),
-        "password": os.getenv("DB_PASSWORD") or os.getenv("MYSQLPASSWORD") or (unquote(parsed.password) if parsed and parsed.password else "root123"),
-        "host": os.getenv("DB_HOST") or os.getenv("MYSQLHOST") or (parsed.hostname if parsed else None) or "localhost",
-        "port": os.getenv("DB_PORT") or os.getenv("MYSQLPORT") or (str(parsed.port) if parsed and parsed.port else "3306"),
-        "name": os.getenv("DB_NAME") or os.getenv("MYSQLDATABASE") or (unquote(parsed.path.lstrip("/")) if parsed and parsed.path else "clinical_platform_db"),
+        "user": os.getenv("MYSQLUSER") or os.getenv("DB_USER") or "root",
+        "password": os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD") or "root123",
+        "host": os.getenv("MYSQLHOST") or os.getenv("DB_HOST") or "localhost",
+        "port": os.getenv("MYSQLPORT") or os.getenv("DB_PORT") or "3306",
+        "name": os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME") or "clinical_platform_db",
     }
 
 
@@ -48,7 +57,7 @@ class Config:
 
     # MySQL database
     # Support both this application's DB_* names and Railway MySQL's native
-    # MYSQL* variables. Explicit DB_* values take precedence.
+    # MYSQL* variables. Railway connection values take precedence over legacy DB_*.
     DB_USER = _DB["user"]
     DB_PASSWORD = _DB["password"]
     DB_HOST = _DB["host"]

@@ -18,15 +18,15 @@ def test_database_url_populates_mysql_settings(monkeypatch):
   }
 
 
-def test_explicit_database_settings_override_connection_url(monkeypatch):
+def test_connection_url_overrides_stale_explicit_database_settings(monkeypatch):
   monkeypatch.setenv("DATABASE_URL", "mysql://url-user:url-pass@url-host:3306/url-db")
   monkeypatch.setenv("DB_HOST", "private-mysql")
   monkeypatch.setenv("DB_NAME", "app_db")
 
   settings = _database_settings()
 
-  assert settings["host"] == "private-mysql"
-  assert settings["name"] == "app_db"
+  assert settings["host"] == "url-host"
+  assert settings["name"] == "url-db"
 
 def test_database_bootstrap_connects_to_provisioned_database(monkeypatch):
   from app import db_bootstrap
@@ -53,3 +53,17 @@ def test_database_bootstrap_connects_to_provisioned_database(monkeypatch):
   assert calls[0]["database"] == "railway"
   assert calls[0]["host"] == "mysql.internal"
   assert calls[1] == "closed"
+
+def test_railway_mysql_variables_override_legacy_db_values(monkeypatch):
+  monkeypatch.delenv("DATABASE_URL", raising=False)
+  monkeypatch.delenv("MYSQL_URL", raising=False)
+  monkeypatch.delenv("MYSQL_PUBLIC_URL", raising=False)
+  monkeypatch.setenv("DB_NAME", "clinical_platform_db")
+  monkeypatch.setenv("MYSQLDATABASE", "railway")
+  monkeypatch.setenv("DB_HOST", "old-host")
+  monkeypatch.setenv("MYSQLHOST", "mysql.railway.internal")
+
+  settings = _database_settings()
+
+  assert settings["name"] == "railway"
+  assert settings["host"] == "mysql.railway.internal"
