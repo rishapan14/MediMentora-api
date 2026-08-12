@@ -1,4 +1,7 @@
 import os
+import threading
+import time
+from pathlib import Path
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -47,6 +50,7 @@ def create_app():
     resources={
       r"/api/*": {"origins": app.config["CORS_ORIGINS"]},
       r"/health": {"origins": app.config["CORS_ORIGINS"]},
+      r"/ready": {"origins": app.config["CORS_ORIGINS"]},
     },
     methods=("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
     allow_headers=("Authorization", "Content-Type", "Accept"),
@@ -126,11 +130,23 @@ def create_app():
 
   @app.before_request
   def _ensure_schema_once():
-    """Apply lightweight DB patches once per process."""
-    if request.path == "/health":
-      return
+    """Gate DB routes until Railway's background schema bootstrap is ready."""
+    if request.method == "OPTIONS" or request.path in ("/health", "/ready"):
+      return None
+
+    ready_file = os.getenv("SCHEMA_READY_FILE", "").strip()
+    if ready_file:
+      if not os.path.isfile(ready_file):
+        return error_response(
+          "Database schema is still initializing. Please retry shortly.",
+          503,
+          {"error_code": "schema_initializing"},
+        )
+      app._schema_patched = True
+      return None
+
     if getattr(app, "_schema_patched", False):
-      return
+      return None
     from app.helpers.schema_patches import (
       ensure_body_systems_hub_schema,
       ensure_learning_schema,
@@ -151,6 +167,7 @@ def create_app():
     ensure_platform_settings_schema()
     ensure_user_previous_role_schema()
     app._schema_patched = True
+    return None
 
   @app.before_request
   def _enforce_maintenance_mode():
@@ -242,6 +259,22 @@ def create_app():
     """Unauthenticated liveness endpoint for Railway and the frontend."""
     return jsonify({"status": "ok", "service": "medimentora-api"}), 200
 
+  @app.route("/ready", methods=["GET"])
+  def readiness_check():
+    """Report whether schema bootstrap completed without blocking liveness."""
+    ready_file = os.getenv("SCHEMA_READY_FILE", "").strip()
+    if ready_file and not os.path.isfile(ready_file):
+      return jsonify({
+        "status": "starting",
+        "service": "medimentora-api",
+        "database_schema": "initializing",
+      }), 503
+    return jsonify({
+      "status": "ok",
+      "service": "medimentora-api",
+      "database_schema": "ready",
+    }), 200
+
   @app.errorhandler(400)
   def bad_request(err):
     return error_response(getattr(err, "description", "Bad request."), 400)
@@ -274,5 +307,35 @@ def create_app():
   def handle_internal_error(err):
     db.session.rollback()
     return error_response("An internal server error occurred.", 500)
+
+  if os.getenv("RUN_SCHEMA_BOOTSTRAP_BACKGROUND", "false").lower() == "true":
+    ready_file = os.getenv("SCHEMA_READY_FILE", "/tmp/medimentora-schema-ready")
+
+    def _bootstrap_schema_in_background():
+      marker = Path(ready_file)
+      if marker.is_file():
+        app.logger.info("Database schema readiness marker already exists")
+        return
+      retry_seconds = float(os.getenv("SCHEMA_BOOTSTRAP_RETRY_SECONDS", "10"))
+      while True:
+        try:
+          from app.schema_bootstrap import bootstrap_schema
+
+          bootstrap_schema(app)
+          marker.touch()
+          app.logger.info("Database schema is ready")
+          return
+        except Exception:
+          app.logger.exception(
+            "Database schema bootstrap failed; retrying in %s seconds",
+            retry_seconds,
+          )
+          time.sleep(retry_seconds)
+
+    threading.Thread(
+      target=_bootstrap_schema_in_background,
+      name="schema-bootstrap",
+      daemon=True,
+    ).start()
 
   return app

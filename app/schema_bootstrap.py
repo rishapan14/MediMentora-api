@@ -27,7 +27,9 @@ def bootstrap_schema(app=None) -> None:
         raise RuntimeError("Timed out waiting for the database schema lock")
 
       try:
+        print("[schema] Creating SQLAlchemy model tables", flush=True)
         db.create_all()
+        print("[schema] Core model tables created", flush=True)
 
         from app.helpers.schema_patches import (
           ensure_body_systems_hub_schema,
@@ -40,14 +42,19 @@ def bootstrap_schema(app=None) -> None:
           ensure_xray_reference_library_schema,
         )
 
-        ensure_report_history_schema()
-        ensure_xray_analysis_schema()
-        ensure_xray_reference_library_schema()
-        ensure_learning_schema()
-        ensure_body_systems_hub_schema()
-        ensure_medical_teacher_schema()
-        ensure_platform_settings_schema()
-        ensure_user_previous_role_schema()
+        patches = (
+          ("report history", ensure_report_history_schema),
+          ("xray analysis", ensure_xray_analysis_schema),
+          ("xray reference library", ensure_xray_reference_library_schema),
+          ("learning", ensure_learning_schema),
+          ("body systems hub", ensure_body_systems_hub_schema),
+          ("medical teacher", ensure_medical_teacher_schema),
+          ("platform settings", ensure_platform_settings_schema),
+          ("user previous role", ensure_user_previous_role_schema),
+        )
+        for label, patch in patches:
+          print(f"[schema] Applying {label} schema", flush=True)
+          patch()
 
         table_names = inspect(db.engine).get_table_names()
         if not table_names:

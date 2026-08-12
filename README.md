@@ -82,12 +82,15 @@ DATABASE_URL=${{MySQL.MYSQL_URL}}
 If the database service has a different Railway service name, replace `MySQL`
 with that name. Alternatively configure all five `DB_*` reference variables;
 the application never mixes a partial `DB_*` configuration with a URL. The web
-container waits for MySQL, creates/patches all tables,
-and only then starts Gunicorn. A failed schema bootstrap fails the deployment
-instead of leaving a healthy-looking API with missing tables.
-The Docker and Procfile startup path uses `start.sh`, which starts one document
-worker beside Gunicorn in the same container. This keeps local uploaded files
-available to both processes on a single Railway service. Mount
+container binds Gunicorn immediately for Railway liveness, then creates and
+patches tables in a retrying background thread. Database-backed routes return a
+controlled `503 schema_initializing` response until `GET /ready` reports `200`;
+`GET /health` remains a database-independent liveness check. Schema failures and
+each migration stage are written to the deployment log instead of becoming an
+opaque Railway `502`.
+
+Run document processing in a separate Railway worker service with the start
+command `python -m app.learning_worker`. Mount
 `TEACHER_UPLOAD_FOLDER` (for example, `/data/medical-teacher`) on persistent
 storage in production, or set `UPLOAD_FOLDER` to a persistent uploads root.
 
