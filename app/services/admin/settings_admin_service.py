@@ -83,7 +83,7 @@ class AdminSettingsService:
       "gemini_model": cfg.get("GEMINI_MODEL"),
       "ocr_engine": os.getenv("OCR_ENGINE", "auto"),
       "xray_vision_model": cfg.get("XRAY_VISION_MODEL"),
-      "db_name": cfg.get("DB_NAME"),
+      "db_name": cfg.get("MYSQL_DATABASE"),
     }
 
   @classmethod

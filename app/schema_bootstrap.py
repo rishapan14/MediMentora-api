@@ -69,10 +69,10 @@ def bootstrap_schema(app=None) -> None:
         table_names = inspect(db.engine).get_table_names()
         if not table_names:
           raise RuntimeError(
-            f"Schema bootstrap created zero tables in database '{app.config['DB_NAME']}'"
+            f"Schema bootstrap created zero tables in database '{app.config['MYSQL_DATABASE']}'"
           )
         print(
-          f"[schema] Database '{app.config['DB_NAME']}' contains "
+          f"[schema] Database '{app.config['MYSQL_DATABASE']}' contains "
           f"{len(table_names)} tables: {', '.join(sorted(table_names))}",
           flush=True,
         )

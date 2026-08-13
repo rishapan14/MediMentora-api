@@ -76,12 +76,12 @@ python -m app.learning_worker
 Link the API service to the Railway MySQL service and add this API variable:
 
 ```text
-DATABASE_URL=${{MySQL.MYSQL_URL}}
+MYSQL_URL=${{MySQL.MYSQL_URL}}
 ```
 
 If the database service has a different Railway service name, replace `MySQL`
-with that name. Alternatively configure all five `DB_*` reference variables;
-the application never mixes a partial `DB_*` configuration with a URL. The web
+with that name. `MYSQL_URL` is the only database connection variable; the
+database named in that URL is where the application creates all tables. The web
 container binds Gunicorn immediately for Railway liveness, then creates and
 patches tables in a retrying background thread. Database-backed routes return a
 controlled `503 schema_initializing` response until `GET /ready` reports `200`;
@@ -203,10 +203,7 @@ Deploy this Flask API on a VM, container, or PaaS with apt/root access (Docker, 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DB_USER` | MySQL username | `root` |
-| `DB_PASSWORD` | MySQL password | — |
-| `DB_HOST` | MySQL host | `localhost` |
-| `DB_NAME` | Database name | `clinical_platform_db` |
+| `MYSQL_URL` | Complete MySQL connection URL (required) | — |
 | `JWT_SECRET_KEY` | JWT signing key | — |
 | `OPENAI_API_KEY` | OpenAI API key | — (uses demo mock if empty) |
 | `FRONTEND_URL` | Frontend URL for password reset | `http://localhost:3000` |

@@ -1,6 +1,6 @@
 import os
 from datetime import timedelta
-from urllib.parse import quote_plus, unquote, urlparse
+from sqlalchemy.engine import make_url
 
 from dotenv import load_dotenv
 
@@ -12,44 +12,32 @@ def _csv_env(name: str, default: str) -> tuple[str, ...]:
     return tuple(value.strip().rstrip("/") for value in os.getenv(name, default).split(",") if value.strip())
 
 
-def _database_settings() -> dict[str, str]:
-    """Resolve one complete database configuration without mixing sources."""
-    explicit = {
-        "user": os.getenv("DB_USER", "").strip(),
-        "password": os.getenv("DB_PASSWORD", ""),
-        "host": os.getenv("DB_HOST", "").strip(),
-        "port": os.getenv("DB_PORT", "").strip(),
-        "name": os.getenv("DB_NAME", "").strip(),
-    }
-    if all(explicit.values()):
-        return explicit
-    database_url = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("MYSQL_URL")
-        or os.getenv("MYSQL_PUBLIC_URL")
-        or ""
-    ).strip()
-    parsed = urlparse(database_url) if database_url else None
+def _mysql_settings(mysql_url: str | None = None) -> dict[str, str]:
+    """Validate MYSQL_URL and normalize it for the PyMySQL SQLAlchemy driver."""
+    raw_url = (mysql_url if mysql_url is not None else os.getenv("MYSQL_URL", "")).strip()
+    if not raw_url:
+        raise RuntimeError("MYSQL_URL is required")
 
-    if parsed and parsed.hostname and parsed.path.lstrip("/"):
-        return {
-            "user": unquote(parsed.username or "root"),
-            "password": unquote(parsed.password or ""),
-            "host": parsed.hostname,
-            "port": str(parsed.port or 3306),
-            "name": unquote(parsed.path.lstrip("/")),
-        }
+    try:
+        url = make_url(raw_url)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("MYSQL_URL is invalid") from exc
 
+    if url.get_backend_name() != "mysql":
+        raise RuntimeError("MYSQL_URL must use the mysql:// scheme")
+    if not url.host or not url.database:
+        raise RuntimeError("MYSQL_URL must include a host and database name")
+
+    sqlalchemy_url = url.set(drivername="mysql+pymysql")
     return {
-        "user": os.getenv("MYSQLUSER") or os.getenv("DB_USER") or "root",
-        "password": os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD") or "root123",
-        "host": os.getenv("MYSQLHOST") or os.getenv("DB_HOST") or "localhost",
-        "port": os.getenv("MYSQLPORT") or os.getenv("DB_PORT") or "3306",
-        "name": os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME") or "clinical_platform_db",
+        "url": sqlalchemy_url.render_as_string(hide_password=False),
+        "host": url.host,
+        "port": str(url.port or 3306),
+        "name": url.database,
     }
 
 
-_DB = _database_settings()
+_MYSQL = _mysql_settings()
 
 
 class Config:
@@ -64,19 +52,12 @@ class Config:
         "http://localhost:3000,http://127.0.0.1:3000,https://medimentora-client.vercel.app",
     )
 
-    # MySQL database
-    # Support both this application's DB_* names and Railway MySQL's native
-    # Use either a complete DB_* bundle, a connection URL, or Railway MYSQL*.
-    DB_USER = _DB["user"]
-    DB_PASSWORD = _DB["password"]
-    DB_HOST = _DB["host"]
-    DB_PORT = _DB["port"]
-    DB_NAME = _DB["name"]
-
-    SQLALCHEMY_DATABASE_URI = (
-        f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-    )
+    # MYSQL_URL is the only database connection setting.
+    MYSQL_URL = _MYSQL["url"]
+    MYSQL_HOST = _MYSQL["host"]
+    MYSQL_PORT = _MYSQL["port"]
+    MYSQL_DATABASE = _MYSQL["name"]
+    SQLALCHEMY_DATABASE_URI = MYSQL_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
 
