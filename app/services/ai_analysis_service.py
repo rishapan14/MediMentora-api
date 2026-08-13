@@ -219,25 +219,17 @@ class AIAnalysisService:
     @classmethod
     def simulation_feedback(cls, scenario, diagnosis, treatment, correct_diagnosis, correct_treatment):
         """Generate immediate AI feedback for simulation attempts."""
+        fallback = cls.local_simulation_feedback(
+            diagnosis, treatment, correct_diagnosis, correct_treatment
+        )
         api_key = current_app.config.get("OPENAI_API_KEY")
         if not api_key:
-            score = 0
-            if diagnosis and diagnosis.lower() == correct_diagnosis.lower():
-                score += 50
-            if treatment and treatment.lower() == correct_treatment.lower():
-                score += 50
-            return {
-                "feedback": (
-                    f"Demo feedback: Your diagnosis was {'correct' if score >= 50 else 'incorrect'}. "
-                    f"Correct diagnosis: {correct_diagnosis}. Correct treatment: {correct_treatment}."
-                ),
-                "score": score,
-            }
+            return fallback
 
         try:
             from openai import OpenAI
         except ImportError:
-            raise RuntimeError("openai package is required.")
+            return fallback
 
         client = OpenAI(api_key=api_key)
         prompt = (
@@ -249,10 +241,55 @@ class AIAnalysisService:
             "Provide constructive clinical feedback and a score 0-100 as JSON: "
             '{"feedback": "...", "score": 85}'
         )
-        response = client.chat.completions.create(
-            model=current_app.config.get("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            response_format={"type": "json_object"},
+        try:
+            response = client.chat.completions.create(
+                model=current_app.config.get("OPENAI_MODEL", "gpt-4o-mini"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                response_format={"type": "json_object"},
+            )
+            result = json.loads(response.choices[0].message.content)
+            score = float(result.get("score", 0))
+            feedback = str(result.get("feedback") or "").strip()
+            if not feedback:
+                return fallback
+            return {"feedback": feedback, "score": max(0, min(100, score))}
+        except Exception:
+            return fallback
+
+    @staticmethod
+    def _answers_match(selected, expected):
+        """Compare clinical choices while tolerating punctuation and concise option labels."""
+        selected_tokens = set(re.findall(r"[a-z0-9]+", str(selected or "").casefold()))
+        expected_tokens = set(re.findall(r"[a-z0-9]+", str(expected or "").casefold()))
+        ignored = {"a", "an", "and", "or", "the", "therapy", "treatment"}
+        selected_tokens -= ignored
+        expected_tokens -= ignored
+        if not selected_tokens or not expected_tokens:
+            return False
+        if selected_tokens == expected_tokens:
+            return True
+        overlap = len(selected_tokens & expected_tokens)
+        return (
+            overlap / len(selected_tokens) >= 0.75
+            and overlap / len(expected_tokens) >= 0.5
         )
-        return json.loads(response.choices[0].message.content)
+
+    @classmethod
+    def local_simulation_feedback(
+        cls, diagnosis, treatment, correct_diagnosis, correct_treatment
+    ):
+        """Return deterministic feedback so simulations work without an AI provider."""
+        diagnosis_correct = cls._answers_match(diagnosis, correct_diagnosis)
+        treatment_correct = cls._answers_match(treatment, correct_treatment)
+        score = (50 if diagnosis_correct else 0) + (50 if treatment_correct else 0)
+        return {
+            "feedback": (
+                "Offline fallback feedback: "
+                f"Your diagnosis was {'correct' if diagnosis_correct else 'incorrect'} and "
+                f"your treatment was {'correct' if treatment_correct else 'incorrect'}. "
+                f"Correct diagnosis: {correct_diagnosis}. "
+                f"Correct treatment: {correct_treatment}."
+            ),
+            "score": score,
+        }

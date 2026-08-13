@@ -214,7 +214,7 @@ def seed_all():
       ],
     },
     correct_diagnosis="Hyperglycemic crisis",
-    correct_treatment="IV fluids, insulin therapy, electrolyte monitoring",
+    correct_treatment="IV fluids and insulin",
     diagnosis_options=["Hypoglycemia", "Hyperglycemic crisis", "DKA only", "UTI"],
     treatment_options=["Oral glucose", "IV fluids and insulin", "Antibiotics only", "Observation"],
     difficulty="medium",

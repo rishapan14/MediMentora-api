@@ -1,3 +1,5 @@
+import logging
+
 from flask import request
 from flask_jwt_extended import current_user
 
@@ -7,6 +9,9 @@ from app.models.quiz_model import Question, Quiz, Result
 from app.services.learning_service import LearningService
 from app.services.quiz_service import QuizService
 from app.validations.quiz_validation import validate_question, validate_quiz, validate_quiz_submit
+
+
+logger = logging.getLogger(__name__)
 
 
 # --- Quiz CRUD ---
@@ -130,7 +135,7 @@ def delete_question(question_id):
 
 def submit_quiz(quiz_id):
   quiz = Quiz.query.get(quiz_id)
-  if not quiz:
+  if not quiz or not quiz.is_published:
     return error_response("Quiz not found.", 404)
 
   data = request.get_json(silent=True)
@@ -155,21 +160,28 @@ def submit_quiz(quiz_id):
     answers=data["answers"],
     passed=calc["score"] >= passing,
     attempt_number=attempt_number,
+    time_taken_seconds=data.get("time_taken_seconds"),
   )
   db.session.add(result)
   db.session.commit()
+  result_payload = result.to_dict()
 
-  LearningService.record_quiz_score(current_user.id, quiz_id, calc["score"])
+  try:
+    LearningService.record_quiz_score(current_user.id, quiz_id, calc["score"])
+  except Exception:
+    db.session.rollback()
+    logger.exception("Quiz progress tracking failed after result %s was saved", result.id)
 
   try:
     from app.services.body_systems.hub_quiz_service import HubQuizService
 
     HubQuizService.record_progress_for_quiz(current_user.id, int(quiz_id), float(calc["score"]))
   except Exception:
+    db.session.rollback()
     pass
 
   return success_response("Quiz submitted.", {
-    "result": result.to_dict(),
+    "result": result_payload,
     "validated_answers": calc["validated_answers"],
   }, 201)
 

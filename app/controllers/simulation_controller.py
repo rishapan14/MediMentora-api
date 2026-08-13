@@ -1,3 +1,5 @@
+import logging
+
 from flask import request
 from flask_jwt_extended import current_user
 
@@ -7,6 +9,9 @@ from app.models.simulation_model import Simulation, SimulationAttempt
 from app.services.ai_analysis_service import AIAnalysisService
 from app.services.learning_service import LearningService
 from app.validations.simulation_validation import validate_simulation, validate_simulation_attempt
+
+
+logger = logging.getLogger(__name__)
 
 
 def list_simulations():
@@ -23,7 +28,7 @@ def list_simulations():
 
 def get_simulation(simulation_id):
   sim = Simulation.query.get(simulation_id)
-  if not sim:
+  if not sim or not sim.is_active:
     return error_response("Simulation not found.", 404)
   return success_response("Simulation retrieved.", {"simulation": sim.to_dict()})
 
@@ -82,7 +87,7 @@ def delete_simulation(simulation_id):
 
 def submit_attempt(simulation_id):
   sim = Simulation.query.get(simulation_id)
-  if not sim:
+  if not sim or not sim.is_active:
     return error_response("Simulation not found.", 404)
 
   data = request.get_json(silent=True)
@@ -99,9 +104,19 @@ def submit_attempt(simulation_id):
       sim.correct_treatment,
     )
   except Exception as exc:
-    return error_response(f"Feedback generation failed: {exc}", 500)
+    logger.warning("AI simulation feedback failed; using local fallback: %s", exc)
+    result = AIAnalysisService.local_simulation_feedback(
+      data["diagnosis_selected"],
+      data["treatment_selected"],
+      sim.correct_diagnosis,
+      sim.correct_treatment,
+    )
 
-  score = min(int(result.get("score", 0)), sim.max_score)
+  try:
+    score = int(round(float(result.get("score", 0))))
+  except (TypeError, ValueError):
+    score = 0
+  score = max(0, min(score, sim.max_score or 100))
   attempt = SimulationAttempt(
     user_id=current_user.id,
     simulation_id=simulation_id,
@@ -112,11 +127,16 @@ def submit_attempt(simulation_id):
   )
   db.session.add(attempt)
   db.session.commit()
+  attempt_payload = attempt.to_dict()
 
-  LearningService.record_simulation_score(current_user.id, simulation_id, score)
+  try:
+    LearningService.record_simulation_score(current_user.id, simulation_id, score)
+  except Exception:
+    db.session.rollback()
+    logger.exception("Simulation progress tracking failed after attempt %s was saved", attempt.id)
 
   return success_response("Simulation attempt saved.", {
-    "attempt": attempt.to_dict(),
+    "attempt": attempt_payload,
     "feedback": result.get("feedback"),
     "score": score,
   }, 201)

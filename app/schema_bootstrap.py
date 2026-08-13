@@ -56,6 +56,16 @@ def bootstrap_schema(app=None) -> None:
           print(f"[schema] Applying {label} schema", flush=True)
           patch()
 
+        print("[schema] Ensuring starter quiz and simulation content", flush=True)
+        from app.seeders.default_feature_seeder import ensure_default_feature_content
+
+        created_content = ensure_default_feature_content()
+        if created_content:
+          print(
+            f"[schema] Created starter content: {', '.join(created_content)}",
+            flush=True,
+          )
+
         table_names = inspect(db.engine).get_table_names()
         if not table_names:
           raise RuntimeError(
